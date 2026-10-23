@@ -107,7 +107,7 @@ Confirm `/ping` answers in Discord. If commands are missing, set `devGuildId` / 
 
 ### GitHub Actions
 
-* `test.yml` — `bun test` on every push and pull request
+* `test.yml` — `bun test` **and** a no-push Docker image build on every push and pull request
 * `build-push.yml` — build and push a commit-SHA tag on push to `main` (also `workflow_dispatch`)
 * `release.yml` — on merge to `main`, semver-tag and push `vX.Y.Z` + `latest`
 
