@@ -1,5 +1,6 @@
-# Copy data/config.json.example → data/config.json and replace every REPLACE_ME_*
-# before `docker compose up`. The bind mount is ./data → /data.
+# Copy data/config.json.example → data/config.json and replace the required
+# REPLACE_ME_* fields (token, clientId). Leave optional ids as "".
+# The bind mount is ./data → /data.
 services:
   barrelhouse-bill-bot:
     image: gitea.willsullivan.dev/furtivespy/barrelhouse-bill-bot:latest

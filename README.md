@@ -57,7 +57,7 @@ This repo cannot set registry credentials from a pull request. In **GitHub → b
 
 | Secret | Value |
 | --- | --- |
-| `REGISTRY_USERNAME` | Username for `gitea.willsullivan.dev` (same as Game Bot / Stancy) |
+| `REGISTRY_USERNAME` | Username for `gitea.willsullivan.dev` |
 | `REGISTRY_TOKEN` | Token/password for that registry |
 
 Without those two secrets, `test.yml` still runs on pull requests, but `build-push.yml` / `release.yml` cannot push the image.
@@ -76,7 +76,7 @@ cp data/config.json.example /path/to/bill-data/config.json
 
 Required: `token`, `clientId`, `environment` (`production` on the server).
 
-Guild / user ids (clearly marked in the sample):
+Optional guild / user ids (empty strings in the sample):
 
 * `devGuildId` — Will's Discord **server** id, if you want slash commands to appear immediately. Leave it `""` to register globally (can take up to an hour).
 * `botOwnerId` — Will's Discord **user** id (optional; otherwise the application owner is used).
@@ -133,7 +133,7 @@ Every package in `package.json` is imported. None were removed.
 Held back (update would be brand-new or would force a risky rewrite):
 
 * **Bun 1.4.3** (not 1.4.4) — same pin in `packageManager`, the `oven/bun` image, and `setup-bun`.
-* **dotenv ^18.0.8** (not 18.0.9) — 18.0.9 was published less than 48 hours before the Stancy review; the cooldown should keep it out of the lockfile.
+* **dotenv ^18.0.8** (not 18.0.9) — 18.0.9 was published less than 48 hours before the starter-bot review; the cooldown should keep it out of the lockfile.
 * **chalk 4.1.2** — still CommonJS; chalk 5 is ESM-native. This project is ES modules (`"type": "module"`), so chalk 4 still `import`s.
 * **K-Phoen/semver-release-action@master** — already a floating `master` pin on the release workflow.
 

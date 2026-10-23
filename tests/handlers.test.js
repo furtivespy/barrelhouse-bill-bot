@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Collection, Events } from "discord.js";
+import { Collection, Events, Routes } from "discord.js";
 import { listJsFiles } from "../src/handlers/discover.js";
 import EventTypes from "../src/base/EventTypes.js";
 import loadEvents from "../src/handlers/events.js";
@@ -203,6 +203,36 @@ describe("slash command registration", () => {
     expect(puts[0].payload.body.map((cmd) => cmd.name)).toEqual(
       expect.arrayContaining(["ping", "settings", "status"])
     );
+  });
+
+  test("empty config.devGuildId registers globally rather than a bogus guild", async () => {
+    const puts = [];
+    const rest = {
+      async put(route, payload) {
+        puts.push({ route, payload });
+      },
+    };
+    const client = fakeClient();
+    client.config = {
+      token: "t",
+      clientId: "client-1",
+      environment: "development",
+      devGuildId: "",
+    };
+    const commands = await loadSlashCommands(client);
+
+    expect(resolveDevGuildId(client.config, { DEV_GUILD_ID: "" })).toBeNull();
+
+    const result = await registerSlashCommands(client, commands, {
+      rest,
+      env: { DEV_GUILD_ID: "" },
+    });
+
+    expect(result).toEqual({ scope: "global", count: commands.length });
+    expect(result.guildId).toBeUndefined();
+    expect(puts).toHaveLength(1);
+    expect(puts[0].route).toEqual(Routes.applicationCommands("client-1"));
+    expect(String(puts[0].route)).not.toMatch(/guilds/);
   });
 
   test("warns in development when registering globally because no guild id is set", async () => {
