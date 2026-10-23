@@ -104,7 +104,7 @@ describe("customId prefix routing", () => {
   test("uses the segment before the first colon as the command name", () => {
     expect(commandNameFromCustomId("ping:again")).toBe("ping");
     expect(commandNameFromCustomId("drop:in:123")).toBe("drop");
-    expect(commandNameFromCustomId("voice-create")).toBe("voice-create");
+    expect(commandNameFromCustomId("settings")).toBe("settings");
   });
 
   test("finds the owning command by customId prefix", () => {

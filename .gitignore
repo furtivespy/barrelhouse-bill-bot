@@ -54,12 +54,15 @@ bun.lockb
 # vscode settings
 .vscode/
 
-#sqlite data
-data/
+# Runtime SQLite and secrets under data/; keep the sample config committed
+data/*
+!data/README.md
+!data/config.json.example
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
 
-#private config as json
+#private config as json (repo-root local copy, or data/config.json on the volume)
 config.json
+data/config.json

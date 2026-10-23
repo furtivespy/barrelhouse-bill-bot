@@ -9,10 +9,6 @@ import {
   registerSlashCommands,
 } from "../src/handlers/slashcommands.js";
 import path from "path";
-import {
-  hasVoiceCommandFile,
-  hasVoiceEventFile,
-} from "./helpers/voiceFeature.js";
 
 function silentLogger() {
   return {
@@ -54,12 +50,8 @@ describe("file discovery", () => {
     expect(commands.some((file) => file.endsWith("settings.js"))).toBe(true);
     expect(events.some((file) => file.endsWith("ready.js"))).toBe(true);
     expect(events.some((file) => file.endsWith("interactionCreate.js"))).toBe(true);
-    if (hasVoiceCommandFile()) {
-      expect(commands.some((file) => file.endsWith("voiceCreate.js"))).toBe(true);
-    }
-    if (hasVoiceEventFile()) {
-      expect(events.some((file) => file.endsWith("voiceStateUpdate.js"))).toBe(true);
-    }
+    expect(commands.some((file) => file.endsWith("voiceCreate.js"))).toBe(false);
+    expect(events.some((file) => file.endsWith("voiceStateUpdate.js"))).toBe(false);
   });
 });
 
@@ -81,13 +73,8 @@ describe("slash command loader", () => {
     expect(client.slash_commands.get("settings")?.data.name).toBe("settings");
     expect(client.slash_commands.get("settings")?.conf.permLevel).toBe("Administrator");
     const names = commands.map((command) => command.data.name).sort();
-    expect(names).toEqual(expect.arrayContaining(["ping", "settings", "status"]));
-    const voiceCreate = client.slash_commands.get("voice-create");
-    if (voiceCreate) {
-      expect(voiceCreate.data.name).toBe("voice-create");
-    } else {
-      expect(names).not.toContain("voice-create");
-    }
+    expect(names).toEqual(["ping", "settings", "status"]);
+    expect(client.slash_commands.get("voice-create")).toBeUndefined();
     expect(logs.some((line) => String(line).includes("Loading Slash Command: ping."))).toBe(
       true
     );
@@ -97,11 +84,6 @@ describe("slash command loader", () => {
     expect(
       logs.some((line) => String(line).includes("Loading Slash Command: settings."))
     ).toBe(true);
-    if (voiceCreate) {
-      expect(
-        logs.some((line) => String(line).includes("Loading Slash Command: voice-create."))
-      ).toBe(true);
-    }
   });
 
   test("resolveDevGuildId prefers env, then config, and has no hardcoded guild", () => {
@@ -138,13 +120,8 @@ describe("event handler", () => {
     expect(client.events.get("interactionCreate")?.help.eventType).toBe(
       "interactionCreate"
     );
-    const voiceStateUpdate = client.events.get("voiceStateUpdate");
-    if (voiceStateUpdate) {
-      expect(typeof client.registered.voiceStateUpdate.handler).toBe("function");
-      expect(voiceStateUpdate.help.eventType).toBe("voiceStateUpdate");
-    } else {
-      expect(client.registered.voiceStateUpdate).toBeUndefined();
-    }
+    expect(client.events.get("voiceStateUpdate")).toBeUndefined();
+    expect(client.registered.voiceStateUpdate).toBeUndefined();
   });
 
   test("clientReady fetches application into appInfo for Bot Owner checks", async () => {

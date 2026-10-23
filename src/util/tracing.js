@@ -1,4 +1,4 @@
-const DEFAULT_SERVICE_NAME = "stancy-bot";
+const DEFAULT_SERVICE_NAME = "barrelhouse-bill-bot";
 const SERVICE_NAME_ATTR = "service.name";
 
 function parseOtelHeaders(raw) {
@@ -174,7 +174,7 @@ async function patchDiscordRest(trace, SpanStatusCode) {
     // discord.js require()s the CJS build of @discordjs/rest. Dynamic
     // import("@discordjs/rest") is a different REST class than Client uses.
     const { REST } = await import("discord.js");
-    const discordRestTracer = trace.getTracer("stancy-bot:rest");
+    const discordRestTracer = trace.getTracer("barrelhouse-bill-bot:rest");
     const originalQueueRequest = REST.prototype.queueRequest;
     REST.prototype.queueRequest = async function patchedQueueRequest(options) {
       const request = options ?? {};

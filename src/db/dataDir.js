@@ -12,8 +12,8 @@ function resolveDataDir(env = process.env) {
   if (isInContainer(env)) {
     return CONTAINER_DATA_DIR;
   }
-  if (env.STANCY_DATA_DIR) {
-    return path.resolve(env.STANCY_DATA_DIR);
+  if (env.BILL_DATA_DIR) {
+    return path.resolve(env.BILL_DATA_DIR);
   }
   return path.resolve("./data");
 }

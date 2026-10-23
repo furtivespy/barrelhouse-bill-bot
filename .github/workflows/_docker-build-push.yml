@@ -16,7 +16,7 @@ on:
 
 env:
   REGISTRY: gitea.willsullivan.dev
-  IMAGE_NAME: furtivespy/stancy-bot
+  IMAGE_NAME: furtivespy/barrelhouse-bill-bot
 
 jobs:
   build-and-push:

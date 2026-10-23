@@ -1,10 +1,10 @@
 {
-  "token": "blah-blah-blah",
-  "clientId": "12345",
+  "token": "REPLACE_ME_DISCORD_BOT_TOKEN",
+  "clientId": "REPLACE_ME_DISCORD_APPLICATION_ID",
   "bugsnagKey": "",
   "environment": "development",
-  "devGuildId": "",
-  "botOwnerId": "",
+  "devGuildId": "REPLACE_ME_DEV_GUILD_ID_OR_LEAVE_BLANK",
+  "botOwnerId": "REPLACE_ME_DISCORD_USER_ID_OR_LEAVE_BLANK",
   "defaultSettings": {
     "modRole": "Moderator",
     "adminRole": "Administrator",
