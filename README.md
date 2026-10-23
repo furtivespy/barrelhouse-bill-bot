@@ -68,7 +68,7 @@ Create (or reuse) a Discord application, enable the bot, copy the **token** and 
 
 ### 3. Data volume config
 
-Copy the sample, then replace every `REPLACE_ME_*` placeholder. JSON has no comments — the placeholder strings are the markers.
+Copy the sample, then replace every `REPLACE_ME_*` placeholder (`token` and `clientId`). Optional guild and user ids are empty strings in the sample — leave them `""` or set real snowflakes. Do not put a `REPLACE_ME_*` string in `devGuildId`; Discord will reject it and slash commands will not register.
 
 ```
 cp data/config.json.example /path/to/bill-data/config.json

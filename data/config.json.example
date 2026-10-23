@@ -3,8 +3,8 @@
   "clientId": "REPLACE_ME_DISCORD_APPLICATION_ID",
   "bugsnagKey": "",
   "environment": "production",
-  "devGuildId": "REPLACE_ME_WILL_SERVER_GUILD_ID",
-  "botOwnerId": "REPLACE_ME_WILL_DISCORD_USER_ID",
+  "devGuildId": "",
+  "botOwnerId": "",
   "defaultSettings": {
     "modRole": "Moderator",
     "adminRole": "Administrator",

@@ -101,6 +101,9 @@ describe("slash command loader", () => {
     expect(
       resolveDevGuildId({ environment: "development", devGuildId: "   " }, { DEV_GUILD_ID: "" })
     ).toBeNull();
+    expect(
+      resolveDevGuildId({ environment: "production", devGuildId: "" }, { DEV_GUILD_ID: "" })
+    ).toBeNull();
   });
 });
 
