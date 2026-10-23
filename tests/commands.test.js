@@ -1,18 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { ChannelType, MessageFlags } from "discord.js";
+import { MessageFlags } from "discord.js";
 import Ping from "../src/commands/slash/ping.js";
 import Settings from "../src/commands/slash/settings.js";
 import Status from "../src/commands/slash/status.js";
 import { DEFAULT_SETTINGS, getSettings, writeSettings } from "../src/util/settings.js";
 import { memoryStore } from "./helpers/memoryStore.js";
-import {
-  VOICE_COMMAND,
-  VOICE_UTIL,
-  tryLoad,
-} from "./helpers/voiceFeature.js";
-
-const VoiceCreate = await tryLoad(VOICE_COMMAND);
-const FALLBACK_PARENT_ID = (await tryLoad(VOICE_UTIL))?.FALLBACK_PARENT_ID ?? null;
 
 function silentLogger() {
   return {
@@ -30,7 +22,7 @@ function avatarClient() {
   return {
     user: {
       displayAvatarURL: () => "https://cdn.example/bot.png",
-      tag: "Stancy#0000",
+      tag: "BarrelhouseBill#0000",
     },
     logger: silentLogger(),
   };
@@ -57,19 +49,6 @@ describe("slash command modules", () => {
     expect(settings.data.name).toBe("settings");
     expect(settings.conf.permLevel).toBe("Administrator");
     expect(settings).toBeInstanceOf(Settings);
-
-    if (VoiceCreate) {
-      const voiceCreate = new VoiceCreate({ logger: silentLogger() });
-      expect(voiceCreate.data.name).toBe("voice-create");
-      expect(voiceCreate.data.description).toBe("Creates a voice channel");
-      expect(voiceCreate).toBeInstanceOf(VoiceCreate);
-      expect(voiceCreate.conf.permLevel).toBe("User");
-
-      const json = voiceCreate.data.toJSON();
-      const nameOption = json.options.find((option) => option.name === "name");
-      expect(nameOption).toBeDefined();
-      expect(nameOption.required).toBe(true);
-    }
   });
 });
 
@@ -107,71 +86,6 @@ describe("/ping", () => {
 
     expect(reply.calls[0].content).toBe("Pong again!");
     expect(reply.calls[0].flags).toBe(MessageFlags.Ephemeral);
-  });
-});
-
-describe.skipIf(!VoiceCreate)("/voice-create", () => {
-  test("creates a GuildVoice channel under the on-demand category", async () => {
-    const voiceCreate = new VoiceCreate({ logger: silentLogger() });
-    const created = { id: "voice-1", toString: () => "<#voice-1>" };
-    const category = {
-      id: "cat-1",
-      name: "On-Demand Voice",
-      type: ChannelType.GuildCategory,
-    };
-    const create = async (options) => {
-      create.calls = [...(create.calls || []), options];
-      return created;
-    };
-    const reply = async (payload) => {
-      reply.calls = [...(reply.calls || []), payload];
-    };
-
-    const interaction = {
-      options: { getString: (key) => (key === "name" ? "Raid Night" : null) },
-      guild: {
-        channels: {
-          cache: { find: (predicate) => [category].find(predicate) },
-          create,
-        },
-      },
-      client: { logger: silentLogger() },
-      reply,
-    };
-
-    await voiceCreate.execute(interaction);
-
-    expect(create.calls).toEqual([
-      {
-        name: "Raid Night",
-        type: ChannelType.GuildVoice,
-        parent: category,
-      },
-    ]);
-    expect(reply.calls[0].content).toBe("Created <#voice-1> - Click to hop in!");
-    expect(reply.calls[0].flags).toBe(MessageFlags.Ephemeral);
-  });
-
-  test("falls back to the hardcoded parent when the category is missing", async () => {
-    const voiceCreate = new VoiceCreate({ logger: silentLogger() });
-    const create = async (options) => {
-      create.calls = [...(create.calls || []), options];
-      return { toString: () => "<#voice-2>" };
-    };
-
-    await voiceCreate.execute({
-      options: { getString: () => "Fallback Channel" },
-      guild: {
-        channels: {
-          cache: { find: () => undefined },
-          create,
-        },
-      },
-      client: { logger: silentLogger() },
-      reply: async () => {},
-    });
-
-    expect(create.calls[0].parent).toBe(FALLBACK_PARENT_ID);
   });
 });
 

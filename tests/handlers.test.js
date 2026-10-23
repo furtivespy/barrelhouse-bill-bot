@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Collection, Events } from "discord.js";
+import { Collection, Events, Routes } from "discord.js";
 import { listJsFiles } from "../src/handlers/discover.js";
 import EventTypes from "../src/base/EventTypes.js";
 import loadEvents from "../src/handlers/events.js";
@@ -9,10 +9,6 @@ import {
   registerSlashCommands,
 } from "../src/handlers/slashcommands.js";
 import path from "path";
-import {
-  hasVoiceCommandFile,
-  hasVoiceEventFile,
-} from "./helpers/voiceFeature.js";
 
 function silentLogger() {
   return {
@@ -54,12 +50,8 @@ describe("file discovery", () => {
     expect(commands.some((file) => file.endsWith("settings.js"))).toBe(true);
     expect(events.some((file) => file.endsWith("ready.js"))).toBe(true);
     expect(events.some((file) => file.endsWith("interactionCreate.js"))).toBe(true);
-    if (hasVoiceCommandFile()) {
-      expect(commands.some((file) => file.endsWith("voiceCreate.js"))).toBe(true);
-    }
-    if (hasVoiceEventFile()) {
-      expect(events.some((file) => file.endsWith("voiceStateUpdate.js"))).toBe(true);
-    }
+    expect(commands.some((file) => file.endsWith("voiceCreate.js"))).toBe(false);
+    expect(events.some((file) => file.endsWith("voiceStateUpdate.js"))).toBe(false);
   });
 });
 
@@ -81,13 +73,8 @@ describe("slash command loader", () => {
     expect(client.slash_commands.get("settings")?.data.name).toBe("settings");
     expect(client.slash_commands.get("settings")?.conf.permLevel).toBe("Administrator");
     const names = commands.map((command) => command.data.name).sort();
-    expect(names).toEqual(expect.arrayContaining(["ping", "settings", "status"]));
-    const voiceCreate = client.slash_commands.get("voice-create");
-    if (voiceCreate) {
-      expect(voiceCreate.data.name).toBe("voice-create");
-    } else {
-      expect(names).not.toContain("voice-create");
-    }
+    expect(names).toEqual(["ping", "settings", "status"]);
+    expect(client.slash_commands.get("voice-create")).toBeUndefined();
     expect(logs.some((line) => String(line).includes("Loading Slash Command: ping."))).toBe(
       true
     );
@@ -97,11 +84,6 @@ describe("slash command loader", () => {
     expect(
       logs.some((line) => String(line).includes("Loading Slash Command: settings."))
     ).toBe(true);
-    if (voiceCreate) {
-      expect(
-        logs.some((line) => String(line).includes("Loading Slash Command: voice-create."))
-      ).toBe(true);
-    }
   });
 
   test("resolveDevGuildId prefers env, then config, and has no hardcoded guild", () => {
@@ -118,6 +100,9 @@ describe("slash command loader", () => {
     ).toBe("111");
     expect(
       resolveDevGuildId({ environment: "development", devGuildId: "   " }, { DEV_GUILD_ID: "" })
+    ).toBeNull();
+    expect(
+      resolveDevGuildId({ environment: "production", devGuildId: "" }, { DEV_GUILD_ID: "" })
     ).toBeNull();
   });
 });
@@ -138,13 +123,8 @@ describe("event handler", () => {
     expect(client.events.get("interactionCreate")?.help.eventType).toBe(
       "interactionCreate"
     );
-    const voiceStateUpdate = client.events.get("voiceStateUpdate");
-    if (voiceStateUpdate) {
-      expect(typeof client.registered.voiceStateUpdate.handler).toBe("function");
-      expect(voiceStateUpdate.help.eventType).toBe("voiceStateUpdate");
-    } else {
-      expect(client.registered.voiceStateUpdate).toBeUndefined();
-    }
+    expect(client.events.get("voiceStateUpdate")).toBeUndefined();
+    expect(client.registered.voiceStateUpdate).toBeUndefined();
   });
 
   test("clientReady fetches application into appInfo for Bot Owner checks", async () => {
@@ -223,6 +203,36 @@ describe("slash command registration", () => {
     expect(puts[0].payload.body.map((cmd) => cmd.name)).toEqual(
       expect.arrayContaining(["ping", "settings", "status"])
     );
+  });
+
+  test("empty config.devGuildId registers globally rather than a bogus guild", async () => {
+    const puts = [];
+    const rest = {
+      async put(route, payload) {
+        puts.push({ route, payload });
+      },
+    };
+    const client = fakeClient();
+    client.config = {
+      token: "t",
+      clientId: "client-1",
+      environment: "development",
+      devGuildId: "",
+    };
+    const commands = await loadSlashCommands(client);
+
+    expect(resolveDevGuildId(client.config, { DEV_GUILD_ID: "" })).toBeNull();
+
+    const result = await registerSlashCommands(client, commands, {
+      rest,
+      env: { DEV_GUILD_ID: "" },
+    });
+
+    expect(result).toEqual({ scope: "global", count: commands.length });
+    expect(result.guildId).toBeUndefined();
+    expect(puts).toHaveLength(1);
+    expect(puts[0].route).toEqual(Routes.applicationCommands("client-1"));
+    expect(String(puts[0].route)).not.toMatch(/guilds/);
   });
 
   test("warns in development when registering globally because no guild id is set", async () => {

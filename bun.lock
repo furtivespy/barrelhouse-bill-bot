@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "discord-bot-gwj",
+      "name": "barrelhouse-bill-bot",
       "dependencies": {
         "@bugsnag/js": "^9.1.0",
         "@discordjs/rest": "^2.6.3",

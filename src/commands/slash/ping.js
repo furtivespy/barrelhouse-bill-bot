@@ -38,7 +38,6 @@ class Ping extends SlashCommand {
       .setThumbnail(client.user.displayAvatarURL())
       .setTimestamp(Date.now())
       .setAuthor({
-        url: `https://www.twitch.tv/x333en`,
         iconURL: interaction.user.displayAvatarURL(),
         name: interaction.user.tag,
       })
@@ -46,7 +45,7 @@ class Ping extends SlashCommand {
         iconURL: client.user.displayAvatarURL(),
         text: client.user.tag,
       })
-      .setURL(`https://discord.gg/8YtDhpbCJf`)
+      .setURL(`https://github.com/furtivespy/barrelhouse-bill-bot`)
       .addFields([
         {
           name: `Field 1`,

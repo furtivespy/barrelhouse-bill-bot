@@ -6,7 +6,7 @@ import { GatewayIntentBits } from "discord.js";
 import { DiscordBot, loadConfig } from "../src/bot.js";
 import { DEFAULT_SETTINGS } from "../src/util/settings.js";
 
-const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "stancy-bot-"));
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "bill-bot-"));
 
 afterAll(() => {
   fs.rmSync(dataDir, { recursive: true, force: true });
@@ -37,7 +37,7 @@ describe("loadConfig", () => {
   const srcDir = path.join(import.meta.dir, "../src");
 
   test("reads JSON from an absolute BOT_CONFIG path", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "stancy-config-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bill-config-"));
     const file = path.join(dir, "config.json");
     const config = { token: "t", clientId: "c", environment: "development" };
     try {
@@ -49,7 +49,7 @@ describe("loadConfig", () => {
   });
 
   test("reads JSON from a path relative to src/bot.js", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "stancy-config-rel-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bill-config-rel-"));
     const file = path.join(dir, "config.json");
     const config = { token: "rel", clientId: "c", environment: "development" };
     try {
@@ -63,14 +63,14 @@ describe("loadConfig", () => {
   });
 
   test("falls back to cwd when the path relative to src/bot.js is missing", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "stancy-config-cwd-"));
-    const file = path.join(dir, "unique-stancy-config.json");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bill-config-cwd-"));
+    const file = path.join(dir, "unique-bill-config.json");
     const config = { token: "cwd", clientId: "c", environment: "development" };
     const previousCwd = process.cwd();
     try {
       fs.writeFileSync(file, JSON.stringify(config));
       process.chdir(dir);
-      expect(loadConfig({ BOT_CONFIG: "unique-stancy-config.json" })).toEqual(config);
+      expect(loadConfig({ BOT_CONFIG: "unique-bill-config.json" })).toEqual(config);
     } finally {
       process.chdir(previousCwd);
       fs.rmSync(dir, { recursive: true, force: true });
@@ -78,7 +78,7 @@ describe("loadConfig", () => {
   });
 
   test("does not swallow a JSON parse error on a relative path", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "stancy-config-bad-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bill-config-bad-"));
     const file = path.join(dir, "config.json");
     try {
       fs.writeFileSync(file, "{ token: 'no quotes' }");

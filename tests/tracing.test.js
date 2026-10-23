@@ -104,7 +104,7 @@ describe("OpenTelemetry config", () => {
     expect(resolveTracingConfig({ OTEL_EXPORTER_OTLP_ENDPOINT: "   " })).toBeNull();
     expect(
       resolveTracingConfig({
-        OTEL_SERVICE_NAME: "stancy-bot",
+        OTEL_SERVICE_NAME: "barrelhouse-bill-bot",
         HONEYCOMB_API_KEY: "not-enough",
       })
     ).toBeNull();
