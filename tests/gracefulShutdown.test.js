@@ -7,8 +7,8 @@ import {
 } from "../src/util/gracefulShutdown.js";
 
 describe("gracefulShutdown", () => {
-  test("only closes the settings store this bot opens", () => {
-    expect(STORE_KEYS).toEqual(["settings"]);
+  test("closes the settings and drops stores this bot opens", () => {
+    expect(STORE_KEYS).toEqual(["settings", "drops"]);
   });
   test("closes stores, then flushes traces, then exits 0", async () => {
     const order = [];
@@ -55,6 +55,23 @@ describe("gracefulShutdown", () => {
 
     expect(closed).toEqual(["settings"]);
     expect(exits).toEqual([0]);
+  });
+
+  test("closes both settings and drops when the bot exposes them", () => {
+    const closed = [];
+    closeStores({
+      settings: {
+        close() {
+          closed.push("settings");
+        },
+      },
+      drops: {
+        close() {
+          closed.push("drops");
+        },
+      },
+    });
+    expect(closed).toEqual(["settings", "drops"]);
   });
 
   test("falls back to store.db.close when close() is missing", () => {

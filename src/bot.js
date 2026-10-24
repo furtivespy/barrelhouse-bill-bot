@@ -11,6 +11,7 @@ import {
   ActivityType,
 } from "discord.js";
 import BunEnmap from "./db/BunEnmap.js";
+import DropStore from "./db/drops.js";
 import { resolveConfigPath } from "./db/dataDir.js";
 import permLevels from "./config.permissionLevels.js";
 import {
@@ -80,7 +81,8 @@ class DiscordBot extends Client {
       cloneLevel: "deep",
       dataDir,
     });
-    this.dataStores = [this.settings];
+    this.drops = new DropStore({ dataDir });
+    this.dataStores = [this.settings, this.drops];
     this.settings.ensure("default", this.config.defaultSettings);
 
     this.logger = createLogger({
