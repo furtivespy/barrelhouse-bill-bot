@@ -167,7 +167,7 @@ function buildDropEmbed(drop, counts = {}) {
   const embed = new EmbedBuilder()
     .setTitle(drop.bottleName)
     .setColor(DROP_EMBED_COLOR)
-    .setFooter({ text: drop.status === "open" ? "Open" : drop.status });
+    .setFooter({ text: drop.status === "open" || !drop.status ? "Open" : drop.status });
 
   if (drop.description) {
     embed.setDescription(drop.description);

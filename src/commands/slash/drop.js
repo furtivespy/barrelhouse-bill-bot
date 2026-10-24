@@ -199,6 +199,7 @@ class Drop extends SlashCommand {
       guildId: interaction.guildId,
       channelId: interaction.channelId,
       createdBy: interaction.user.id,
+      status: "open",
       ...fields,
     };
     const payload = buildDropMessage(draft, {
