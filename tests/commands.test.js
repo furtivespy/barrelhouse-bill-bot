@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { MessageFlags } from "discord.js";
+import Drop from "../src/commands/slash/drop.js";
 import Ping from "../src/commands/slash/ping.js";
 import Settings from "../src/commands/slash/settings.js";
 import Status from "../src/commands/slash/status.js";
@@ -33,6 +34,7 @@ describe("slash command modules", () => {
     const ping = new Ping(avatarClient());
     const status = new Status({ logger: silentLogger() });
     const settings = new Settings({ logger: silentLogger() });
+    const drop = new Drop({ logger: silentLogger() });
 
     expect(ping.data.name).toBe("ping");
     expect(ping.data.description).toBe("Replies with Pong!");
@@ -49,6 +51,11 @@ describe("slash command modules", () => {
     expect(settings.data.name).toBe("settings");
     expect(settings.conf.permLevel).toBe("Administrator");
     expect(settings).toBeInstanceOf(Settings);
+
+    expect(drop.data.name).toBe("drop");
+    expect(drop.conf.permLevel).toBe("User");
+    expect(drop).toBeInstanceOf(Drop);
+    expect(drop.data.toJSON().options[0].name).toBe("create");
   });
 });
 

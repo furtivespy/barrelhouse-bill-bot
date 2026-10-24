@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Collection, Events, Routes } from "discord.js";
+import { Collection, Events, MessageFlags, Routes } from "discord.js";
 import { listJsFiles } from "../src/handlers/discover.js";
 import EventTypes from "../src/base/EventTypes.js";
 import loadEvents from "../src/handlers/events.js";
@@ -48,6 +48,7 @@ describe("file discovery", () => {
     expect(commands.some((file) => file.endsWith("ping.js"))).toBe(true);
     expect(commands.some((file) => file.endsWith("status.js"))).toBe(true);
     expect(commands.some((file) => file.endsWith("settings.js"))).toBe(true);
+    expect(commands.some((file) => file.endsWith("drop.js"))).toBe(true);
     expect(events.some((file) => file.endsWith("ready.js"))).toBe(true);
     expect(events.some((file) => file.endsWith("interactionCreate.js"))).toBe(true);
     expect(commands.some((file) => file.endsWith("voiceCreate.js"))).toBe(false);
@@ -56,7 +57,7 @@ describe("file discovery", () => {
 });
 
 describe("slash command loader", () => {
-  test("auto-discovers ping, settings, and status without a Discord token", async () => {
+  test("auto-discovers ping, settings, status, and drop without a Discord token", async () => {
     const logs = [];
     const client = fakeClient();
     client.logger = {
@@ -72,8 +73,10 @@ describe("slash command loader", () => {
     expect(client.slash_commands.get("status")?.data.name).toBe("status");
     expect(client.slash_commands.get("settings")?.data.name).toBe("settings");
     expect(client.slash_commands.get("settings")?.conf.permLevel).toBe("Administrator");
+    expect(client.slash_commands.get("drop")?.data.name).toBe("drop");
+    expect(client.slash_commands.get("drop")?.conf.permLevel).toBe("User");
     const names = commands.map((command) => command.data.name).sort();
-    expect(names).toEqual(["ping", "settings", "status"]);
+    expect(names).toEqual(["drop", "ping", "settings", "status"]);
     expect(client.slash_commands.get("voice-create")).toBeUndefined();
     expect(logs.some((line) => String(line).includes("Loading Slash Command: ping."))).toBe(
       true
@@ -84,6 +87,9 @@ describe("slash command loader", () => {
     expect(
       logs.some((line) => String(line).includes("Loading Slash Command: settings."))
     ).toBe(true);
+    expect(logs.some((line) => String(line).includes("Loading Slash Command: drop."))).toBe(
+      true
+    );
   });
 
   test("resolveDevGuildId prefers env, then config, and has no hardcoded guild", () => {
@@ -168,6 +174,34 @@ describe("event handler", () => {
 
     expect(replies[0].content).toBe("Pong again!");
   });
+
+  test("interactionCreate routes a drop In button by customId prefix", async () => {
+    const client = fakeClient();
+    await loadSlashCommands(client);
+    await loadEvents(client);
+
+    const replies = [];
+    await client.registered.interactionCreate.handler({
+      isCommand: () => false,
+      isChatInputCommand: () => false,
+      isAutocomplete: () => false,
+      isButton: () => true,
+      isAnySelectMenu: () => false,
+      isModalSubmit: () => false,
+      deferred: false,
+      replied: false,
+      createdTimestamp: Date.now(),
+      customId: "drop:in:drop-1",
+      options: { getSubcommand: () => null },
+      user: { id: "user-1" },
+      reply: async (payload) => {
+        replies.push(payload);
+      },
+    });
+
+    expect(replies[0].content).toBe("Sign-up handling is not available yet.");
+    expect(replies[0].flags).toBe(MessageFlags.Ephemeral);
+  });
 });
 
 describe("slash command registration", () => {
@@ -201,7 +235,7 @@ describe("slash command registration", () => {
     expect(puts[0].payload.body).toHaveLength(commands.length);
     expect(puts[1].payload.body).toHaveLength(commands.length);
     expect(puts[0].payload.body.map((cmd) => cmd.name)).toEqual(
-      expect.arrayContaining(["ping", "settings", "status"])
+      expect.arrayContaining(["drop", "ping", "settings", "status"])
     );
   });
 
