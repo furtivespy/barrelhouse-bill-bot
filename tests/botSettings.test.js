@@ -29,7 +29,15 @@ describe("DiscordBot settings helpers", () => {
     bot.writeSettings("guild-1", { modRole: "Staff" });
     expect(bot.getSettings({ id: "guild-1" }).modRole).toBe("Staff");
     expect(bot.settings.get("guild-1")).toEqual({ modRole: "Staff" });
+    const drop = bot.drops.createDrop({
+      guildId: "guild-1",
+      channelId: "channel-1",
+      bottleName: "Blanton's",
+      createdBy: "mod-1",
+    });
+    expect(bot.drops.getDrop(drop.id).bottleName).toBe("Blanton's");
     bot.settings.close();
+    bot.drops.close();
   });
 });
 

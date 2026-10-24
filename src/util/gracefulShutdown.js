@@ -1,6 +1,6 @@
 import { shutdownTracing } from "./tracing.js";
 
-const STORE_KEYS = ["settings"];
+const STORE_KEYS = ["settings", "drops"];
 
 function collectStores(client) {
   const stores = [];
