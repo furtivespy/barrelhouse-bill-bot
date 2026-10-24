@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   SlashCommandBuilder,
   PermissionsBitField,
@@ -11,8 +12,64 @@ import {
   buildDropMessage,
   parseDropCreateInput,
   readCreateOptions,
-  signupCountsForDrop,
 } from "../../util/dropPost.js";
+import { resolveTimeZone } from "../../util/timeZone.js";
+
+async function replyPrivately(interaction, content) {
+  const payload = { content, flags: MessageFlags.Ephemeral };
+  if (interaction?.deferred && typeof interaction.editReply === "function") {
+    await interaction.editReply({ content });
+    return;
+  }
+  if (interaction?.replied && typeof interaction.followUp === "function") {
+    await interaction.followUp(payload);
+    return;
+  }
+  if (typeof interaction?.reply === "function") {
+    await interaction.reply(payload);
+  }
+}
+
+async function tryReplyPrivately(interaction, content, logger) {
+  try {
+    await replyPrivately(interaction, content);
+  } catch (error) {
+    logger?.error(error, "drop create");
+  }
+}
+
+async function postDropMessage(interaction, payload) {
+  if (typeof interaction.channel?.send === "function") {
+    if (!interaction.deferred && !interaction.replied && typeof interaction.deferReply === "function") {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    }
+    const posted = await interaction.channel.send(payload);
+    if (!posted?.id) {
+      throw new Error("channel send did not return a message id");
+    }
+    return { posted, via: "send" };
+  }
+
+  await interaction.reply(payload);
+  if (typeof interaction.fetchReply !== "function") {
+    throw new Error("Could not read the posted drop message.");
+  }
+  const posted = await interaction.fetchReply();
+  if (!posted?.id) {
+    throw new Error("Could not read the posted drop message.");
+  }
+  return { posted, via: "reply" };
+}
+
+async function deletePostedMessage(interaction, posted) {
+  if (posted && typeof posted.delete === "function") {
+    await posted.delete();
+    return;
+  }
+  if (typeof interaction?.deleteReply === "function") {
+    await interaction.deleteReply();
+  }
+}
 
 class Drop extends SlashCommand {
   constructor(client) {
@@ -64,7 +121,7 @@ class Drop extends SlashCommand {
           .addStringOption((option) =>
             option
               .setName("close_time")
-              .setDescription("ISO 8601 close time, e.g. 2026-10-24T18:00:00Z")
+              .setDescription("Close time in the bot timezone, or ISO 8601 with Z/offset")
               .setRequired(false)
               .setMaxLength(40)
           )
@@ -76,6 +133,14 @@ class Drop extends SlashCommand {
               .setMaxLength(600)
           )
       );
+  }
+
+  botTimeZone() {
+    try {
+      return resolveTimeZone(this.client?.config);
+    } catch (error) {
+      throw new DropCreateValidationError(error.message);
+    }
   }
 
   async execute(interaction) {
@@ -98,7 +163,9 @@ class Drop extends SlashCommand {
 
     let fields;
     try {
-      fields = parseDropCreateInput(readCreateOptions(interaction));
+      fields = parseDropCreateInput(readCreateOptions(interaction), {
+        timeZone: this.botTimeZone(),
+      });
     } catch (error) {
       if (error instanceof DropCreateValidationError) {
         await interaction.reply({
@@ -119,42 +186,64 @@ class Drop extends SlashCommand {
       return;
     }
 
-    let drop;
-    try {
-      drop = store.createDrop({
-        guildId: interaction.guildId,
-        channelId: interaction.channelId,
-        createdBy: interaction.user?.id,
-        ...fields,
+    if (!interaction.user?.id) {
+      await interaction.reply({
+        content: "Could not determine who created this drop.",
+        flags: MessageFlags.Ephemeral,
       });
-    } catch (error) {
-      if (error instanceof DropValidationError || error instanceof DropCreateValidationError) {
-        await interaction.reply({
-          content: error.message,
-          flags: MessageFlags.Ephemeral,
-        });
-        return;
-      }
-      throw error;
+      return;
     }
 
-    const counts = signupCountsForDrop(store, drop);
-    await interaction.reply(buildDropMessage(drop, counts));
+    const draft = {
+      id: randomUUID(),
+      guildId: interaction.guildId,
+      channelId: interaction.channelId,
+      createdBy: interaction.user.id,
+      ...fields,
+    };
+    const payload = buildDropMessage(draft, {
+      allocated: 0,
+      waitlisted: 0,
+      bottleLimit: draft.bottleLimit,
+    });
 
-    if (typeof interaction.fetchReply !== "function") {
-      return drop;
-    }
-
+    let posted;
     try {
-      const posted = await interaction.fetchReply();
-      if (posted?.id) {
-        drop = store.updateDrop(drop.id, { messageId: posted.id });
-      }
+      ({ posted } = await postDropMessage(interaction, payload));
     } catch (error) {
       this.client?.logger?.error(error, "drop create");
+      try {
+        await deletePostedMessage(interaction, posted);
+      } catch (cleanupError) {
+        this.client?.logger?.error(cleanupError, "drop create cleanup");
+      }
+      await tryReplyPrivately(interaction, "Could not post the drop.", this.client?.logger);
+      return;
     }
 
-    return drop;
+    try {
+      const drop = store.createDrop({
+        ...draft,
+        messageId: posted.id,
+      });
+      if (typeof interaction.channel?.send === "function") {
+        await tryReplyPrivately(interaction, "Drop posted.", this.client?.logger);
+      }
+      return drop;
+    } catch (error) {
+      this.client?.logger?.error(error, "drop create");
+      try {
+        await deletePostedMessage(interaction, posted);
+      } catch (cleanupError) {
+        this.client?.logger?.error(cleanupError, "drop create cleanup");
+      }
+
+      const message =
+        error instanceof DropValidationError || error instanceof DropCreateValidationError
+          ? error.message
+          : "Could not save the drop. The post was removed.";
+      await tryReplyPrivately(interaction, message, this.client?.logger);
+    }
   }
 
   async button(interaction) {

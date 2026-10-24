@@ -25,6 +25,7 @@ Optional:
 * `bugsnagKey` (config) — when set, `error` logs are reported to Bugsnag. When unset, blank, or the placeholder `abc123`, the logger stays on the console only.
 * `defaultSettings` — per-server defaults (`modRole`, `adminRole`, `systemNotice`) merged with guild overrides stored in SQLite
 * `botOwnerId` — Discord user id treated as Bot Owner for permission checks. If unset, the Discord application owner (fetched on `clientReady`) is used.
+* `timezone` — IANA zone used when `/drop create` is given a close time without `Z` or an offset. Defaults to `America/New_York` (Syracuse). Explicit `Z` / offsets are honored as written.
 * `BILL_DATA_DIR` (env) — local directory for SQLite files (defaults to `./data`). In a container this is always `/data`.
 * `DEV_GUILD_ID` (env) or `devGuildId` (config) — register slash commands to this guild instead of globally. Instant updates while developing. If neither is set, commands register globally (and development logs a warning). There is no hardcoded fallback guild.
 * `OTEL_EXPORTER_OTLP_ENDPOINT` (env) — optional OpenTelemetry. Tracing is off unless this endpoint is set.
@@ -107,7 +108,7 @@ Confirm `/ping` answers in Discord. If commands are missing, set `devGuildId` / 
 
 ### GitHub Actions
 
-* `test.yml` — `bun test` **and** a no-push Docker image build on every push and pull request
+* `test.yml` — `bun test` under `TZ=UTC` and `TZ=America/New_York` **and** a no-push Docker image build on every push and pull request
 * `build-push.yml` — build and push a commit-SHA tag on push to `main` (also `workflow_dispatch`)
 * `release.yml` — on merge to `main`, semver-tag and push `vX.Y.Z` + `latest`
 

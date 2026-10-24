@@ -17,6 +17,7 @@ import {
   countSignups,
   formatSignupCounts,
   inButtonCustomId,
+  parseCloseTime,
   parseDropCreateInput,
   parseInButtonCustomId,
   readCreateOptions,
@@ -39,10 +40,11 @@ function memoryDrops() {
   return new DropStore({ filename: ":memory:" });
 }
 
-function dropClient(store = memoryDrops()) {
+function dropClient(store = memoryDrops(), config = {}) {
   return {
     logger: silentLogger(),
     drops: store,
+    config,
   };
 }
 
@@ -132,7 +134,33 @@ describe("drop create option parsing", () => {
     expect(parseDropCreateInput({ bottle: "X", limit: "6" }).bottleLimit).toBe(6);
   });
 
-  test("accepts ISO close times and YYYY-MM-DD HH:mm, rejects junk", () => {
+  test("interprets offset-less close times in the bot timezone, not the host TZ", () => {
+    const spaceForm = parseDropCreateInput({
+      bottle: "X",
+      closeTime: "2026-10-24 18:00",
+    }).closeTime;
+    const tForm = parseDropCreateInput({
+      bottle: "X",
+      closeTime: "2026-10-24T18:00",
+    }).closeTime;
+
+    expect(spaceForm).toBe("2026-10-24T22:00:00.000Z");
+    expect(tForm).toBe(spaceForm);
+    expect(
+      parseDropCreateInput({
+        bottle: "X",
+        closeTime: "2026-01-15T18:00",
+      }).closeTime
+    ).toBe("2026-01-15T23:00:00.000Z");
+    expect(
+      parseDropCreateInput(
+        { bottle: "X", closeTime: "2026-10-24T18:00" },
+        { timeZone: "UTC" }
+      ).closeTime
+    ).toBe("2026-10-24T18:00:00.000Z");
+  });
+
+  test("honors explicit Z and offsets and rejects invalid close times", () => {
     expect(
       parseDropCreateInput({
         bottle: "X",
@@ -142,15 +170,10 @@ describe("drop create option parsing", () => {
     expect(
       parseDropCreateInput({
         bottle: "X",
-        closeTime: "2026-10-24 18:00",
+        closeTime: "2026-10-24T18:00:00-04:00",
       }).closeTime
-    ).toBe("2026-10-24T18:00:00.000Z");
-    expect(
-      parseDropCreateInput({
-        bottle: "X",
-        closeTime: "2026-10-24T18:00",
-      }).closeTime
-    ).toBe("2026-10-24T18:00:00.000Z");
+    ).toBe("2026-10-24T22:00:00.000Z");
+    expect(parseCloseTime("2026-10-24T18:00:00+0500")).toBe("2026-10-24T13:00:00.000Z");
     expect(() => parseDropCreateInput({ bottle: "X", closeTime: true })).toThrow(
       /close time must be a valid date/
     );
@@ -159,6 +182,15 @@ describe("drop create option parsing", () => {
     );
     expect(() => parseDropCreateInput({ bottle: "X", closeTime: "2026" })).toThrow(
       DropCreateValidationError
+    );
+    expect(() => parseDropCreateInput({ bottle: "X", closeTime: "2026-10-24" })).toThrow(
+      /ISO 8601/
+    );
+    expect(() => parseDropCreateInput({ bottle: "X", closeTime: "2026-02-30T18:00" })).toThrow(
+      /close time must be a valid date/
+    );
+    expect(() => parseDropCreateInput({ bottle: "X", closeTime: "2026-10-24T24:00" })).toThrow(
+      /close time must be a valid date/
     );
   });
 
@@ -259,7 +291,7 @@ describe("drop embed and In button rendering", () => {
         { name: "Price", value: "$59.99", inline: true },
         { name: "Store", value: "Liquor Barn New Circle", inline: true },
         { name: "Limit", value: "12", inline: true },
-        { name: "Closes", value: "<t:1792864800:F>", inline: true },
+        { name: "Closes", value: "<t:1792864800:f> (<t:1792864800:R>)", inline: true },
         { name: "Sign-ups", value: "7/12 in, 3 waitlisted", inline: false },
       ])
     );
@@ -400,6 +432,207 @@ describe("/drop create", () => {
     expect(replies[1].flags).toBe(MessageFlags.Ephemeral);
     expect(command.client.drops.listDrops()).toEqual([]);
     command.client.drops.close();
+  });
+
+  test("posts via channel.send, persists the message id, and acks the mod privately", async () => {
+    const store = memoryDrops();
+    const command = new Drop(dropClient(store));
+    const sent = [];
+    const privates = [];
+    const interaction = {
+      guildId: "guild-1",
+      channelId: "channel-9",
+      user: { id: "mod-1" },
+      options: optionBag({ bottle: "Weller Antique", limit: 6 }),
+      deferred: false,
+      replied: false,
+      deferReply: async () => {
+        interaction.deferred = true;
+      },
+      editReply: async (payload) => privates.push(payload),
+      channel: {
+        send: async (payload) => {
+          sent.push(payload);
+          return { id: "msg-send-7" };
+        },
+      },
+    };
+
+    const drop = await command.execute(interaction);
+
+    expect(drop.messageId).toBe("msg-send-7");
+    expect(store.getDrop(drop.id).messageId).toBe("msg-send-7");
+    expect(sent).toHaveLength(1);
+    expect(sent[0].embeds[0].toJSON().title).toBe("Weller Antique");
+    expect(privates).toEqual([{ content: "Drop posted." }]);
+    store.close();
+  });
+
+  test("deletes the public post and tells the mod when persist fails after reply", async () => {
+    const deleted = [];
+    const replies = [];
+    const command = new Drop({
+      logger: silentLogger(),
+      drops: {
+        createDrop() {
+          throw new Error("disk full");
+        },
+      },
+    });
+    const posted = {
+      id: "msg-orphan",
+      delete: async () => deleted.push("message"),
+    };
+
+    await command.execute({
+      guildId: "guild-1",
+      channelId: "channel-1",
+      user: { id: "mod-1" },
+      options: optionBag({ bottle: "Eagle Rare" }),
+      reply: async (payload) => replies.push(payload),
+      fetchReply: async () => posted,
+    });
+
+    expect(deleted).toEqual(["message"]);
+    expect(replies).toHaveLength(2);
+    expect(replies[0].embeds[0].toJSON().title).toBe("Eagle Rare");
+    expect(replies[1]).toEqual({
+      content: "Could not save the drop. The post was removed.",
+      flags: MessageFlags.Ephemeral,
+    });
+  });
+
+  test("does not persist a drop when fetchReply fails after a public reply", async () => {
+    const store = memoryDrops();
+    const command = new Drop(dropClient(store));
+    const replies = [];
+    const deleted = [];
+
+    await command.execute({
+      guildId: "guild-1",
+      channelId: "channel-1",
+      user: { id: "mod-1" },
+      options: optionBag({ bottle: "Blanton's" }),
+      reply: async (payload) => replies.push(payload),
+      fetchReply: async () => {
+        throw new Error("Unknown Message");
+      },
+      deleteReply: async () => deleted.push("reply"),
+    });
+
+    expect(store.listDrops()).toEqual([]);
+    expect(deleted).toEqual(["reply"]);
+    expect(replies[0].embeds[0].toJSON().title).toBe("Blanton's");
+    expect(replies[1]).toEqual({
+      content: "Could not post the drop.",
+      flags: MessageFlags.Ephemeral,
+    });
+    store.close();
+  });
+
+  test("does not persist a drop when channel.send fails", async () => {
+    const store = memoryDrops();
+    const command = new Drop(dropClient(store));
+    const replies = [];
+    const interaction = {
+      guildId: "guild-1",
+      channelId: "channel-1",
+      user: { id: "mod-1" },
+      options: optionBag({ bottle: "EH Taylor" }),
+      deferred: false,
+      replied: false,
+      deferReply: async () => {
+        interaction.deferred = true;
+      },
+      editReply: async (payload) => replies.push(payload),
+      channel: {
+        send: async () => {
+          throw new Error("Missing Access");
+        },
+      },
+    };
+
+    await command.execute(interaction);
+
+    expect(store.listDrops()).toEqual([]);
+    expect(replies).toEqual([{ content: "Could not post the drop." }]);
+    store.close();
+  });
+
+  test("deletes the channel message when persist fails after channel.send", async () => {
+    const deleted = [];
+    const replies = [];
+    const command = new Drop({
+      logger: silentLogger(),
+      drops: {
+        createDrop() {
+          throw new Error("constraint");
+        },
+      },
+    });
+    const interaction = {
+      guildId: "guild-1",
+      channelId: "channel-1",
+      user: { id: "mod-1" },
+      options: optionBag({ bottle: "Weller" }),
+      deferred: false,
+      replied: false,
+      deferReply: async () => {
+        interaction.deferred = true;
+      },
+      editReply: async (payload) => replies.push(payload),
+      channel: {
+        send: async () => ({
+          id: "msg-send-fail",
+          delete: async () => deleted.push("message"),
+        }),
+      },
+    };
+
+    await command.execute(interaction);
+
+    expect(deleted).toEqual(["message"]);
+    expect(replies).toEqual([{ content: "Could not save the drop. The post was removed." }]);
+  });
+
+  test("replies ephemerally when createdBy is missing", async () => {
+    const store = memoryDrops();
+    const command = new Drop(dropClient(store));
+    const replies = [];
+
+    await command.execute({
+      guildId: "guild-1",
+      channelId: "channel-1",
+      user: {},
+      options: optionBag({ bottle: "X" }),
+      reply: async (payload) => replies.push(payload),
+    });
+
+    expect(replies[0]).toEqual({
+      content: "Could not determine who created this drop.",
+      flags: MessageFlags.Ephemeral,
+    });
+    expect(store.listDrops()).toEqual([]);
+    store.close();
+  });
+
+  test("uses the configured bot timezone when creating a drop", async () => {
+    const store = memoryDrops();
+    const command = new Drop(dropClient(store, { timezone: "UTC" }));
+    const drop = await command.execute({
+      guildId: "guild-1",
+      channelId: "channel-1",
+      user: { id: "mod-1" },
+      options: optionBag({
+        bottle: "X",
+        close_time: "2026-10-24T18:00",
+      }),
+      reply: async () => {},
+      fetchReply: async () => ({ id: "msg-tz" }),
+    });
+
+    expect(drop.closeTime).toBe("2026-10-24T18:00:00.000Z");
+    store.close();
   });
 
   test("button handler acks with an ephemeral placeholder until FUR-122", async () => {

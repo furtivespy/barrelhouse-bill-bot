@@ -4,14 +4,26 @@ import {
   ButtonStyle,
   EmbedBuilder,
 } from "discord.js";
+import {
+  DropValidationError,
+  optionalBottleLimit,
+  optionalText,
+  optionalTimestamp,
+  requiredText,
+} from "../db/drops.js";
+import {
+  DEFAULT_TIME_ZONE,
+  instantToIso,
+  resolveTimeZone,
+  zonedPlainToIso,
+} from "./timeZone.js";
 
 const DROP_COMMAND_NAME = "drop";
 const IN_BUTTON_PREFIX = "drop:in:";
 const DROP_EMBED_COLOR = 0xc4a35a;
 
-const ISO_TIMESTAMP =
-  /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})?)?$/;
-const LOCAL_DATETIME = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::(\d{2}))?$/;
+const HAS_DATE_AND_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+const HAS_EXPLICIT_OFFSET = /(?:Z|[+-]\d{2}:?\d{2})$/i;
 
 class DropCreateValidationError extends Error {
   constructor(message) {
@@ -20,98 +32,63 @@ class DropCreateValidationError extends Error {
   }
 }
 
-function optionalText(value, field) {
-  if (value == null || value === "") return null;
-  if (typeof value !== "string") {
-    throw new DropCreateValidationError(`${field} must be a string`);
-  }
-  const text = value.trim();
-  return text === "" ? null : text;
-}
-
-function requiredText(value, field) {
-  const text = optionalText(value, field);
-  if (!text) {
-    throw new DropCreateValidationError(`${field} is required`);
-  }
-  return text;
-}
-
-function parseBottleLimit(value) {
-  if (value == null || value === "") return null;
-  if (typeof value === "boolean") {
-    throw new DropCreateValidationError("limit must be a positive integer");
-  }
-
-  let limit;
-  if (typeof value === "number") {
-    limit = value;
-  } else if (typeof value === "string") {
-    const text = value.trim();
-    if (!/^[1-9]\d*$/.test(text)) {
-      throw new DropCreateValidationError("limit must be a positive integer");
+function withCreateValidation(work) {
+  try {
+    return work();
+  } catch (error) {
+    if (error instanceof DropValidationError) {
+      throw new DropCreateValidationError(error.message);
     }
-    limit = Number(text);
-  } else {
-    throw new DropCreateValidationError("limit must be a positive integer");
+    throw error;
   }
-
-  if (!Number.isInteger(limit) || limit < 1) {
-    throw new DropCreateValidationError("limit must be a positive integer");
-  }
-  return limit;
 }
 
-function parseCloseTime(value) {
-  if (value == null || value === "") return null;
-  if (typeof value === "boolean" || typeof value === "number") {
+function parseCloseTimeString(text, timeZone) {
+  const normalized = text.replace(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})/, "$1T$2");
+  if (!HAS_DATE_AND_TIME.test(normalized)) {
+    throw new DropCreateValidationError(
+      "close time must be an ISO 8601 date, e.g. 2026-10-24T18:00:00Z or 2026-10-24 18:00"
+    );
+  }
+
+  try {
+    if (HAS_EXPLICIT_OFFSET.test(normalized)) {
+      return instantToIso(normalized);
+    }
+    return zonedPlainToIso(normalized, resolveTimeZone({ timezone: timeZone }));
+  } catch (error) {
+    if (error instanceof DropCreateValidationError) throw error;
+    if (/unknown timezone/.test(error?.message || "")) {
+      throw new DropCreateValidationError(error.message);
+    }
     throw new DropCreateValidationError("close time must be a valid date");
   }
-  if (value instanceof Date) {
-    if (Number.isNaN(value.getTime())) {
-      throw new DropCreateValidationError("close time must be a valid date");
-    }
-    return value.toISOString();
-  }
-  if (typeof value !== "string") {
-    throw new DropCreateValidationError("close time must be a valid date");
-  }
-
-  const text = value.trim();
-  if (!text) return null;
-
-  if (ISO_TIMESTAMP.test(text)) {
-    const parsed = new Date(text);
-    if (Number.isNaN(parsed.getTime())) {
-      throw new DropCreateValidationError("close time must be a valid date");
-    }
-    return parsed.toISOString();
-  }
-
-  const local = text.match(LOCAL_DATETIME);
-  if (local) {
-    const seconds = local[3] || "00";
-    const parsed = new Date(`${local[1]}T${local[2]}:${seconds}.000Z`);
-    if (Number.isNaN(parsed.getTime())) {
-      throw new DropCreateValidationError("close time must be a valid date");
-    }
-    return parsed.toISOString();
-  }
-
-  throw new DropCreateValidationError(
-    "close time must be an ISO 8601 date, e.g. 2026-10-24T18:00:00Z"
-  );
 }
 
-function parseDropCreateInput(input = {}) {
-  return {
-    bottleName: requiredText(input.bottle, "bottle"),
-    description: optionalText(input.description, "description"),
-    price: optionalText(input.price, "price"),
-    location: optionalText(input.store, "store"),
-    bottleLimit: parseBottleLimit(input.limit),
-    closeTime: parseCloseTime(input.closeTime),
-  };
+function parseCloseTime(value, timeZone = DEFAULT_TIME_ZONE) {
+  return withCreateValidation(() => {
+    if (value == null || value === "") return null;
+    if (typeof value === "string") {
+      const text = value.trim();
+      if (!text) return null;
+      return optionalTimestamp(parseCloseTimeString(text, timeZone), "close time");
+    }
+    return optionalTimestamp(value, "close time");
+  });
+}
+
+function parseDropCreateInput(input = {}, options = {}) {
+  return withCreateValidation(() => {
+    const timeZone = options.timeZone ?? DEFAULT_TIME_ZONE;
+    return {
+      bottleName: requiredText(input.bottle, "bottle"),
+      description: optionalText(input.description, "description"),
+      price: optionalText(input.price, "price"),
+      location: optionalText(input.store, "store"),
+      bottleLimit: optionalBottleLimit(input.limit, "limit"),
+      closeTime: parseCloseTime(input.closeTime, timeZone),
+    };
+  });
 }
 
 function readCreateOptions(interaction) {
@@ -155,7 +132,7 @@ function formatSignupCounts({ allocated = 0, waitlisted = 0, bottleLimit = null 
 
 function discordTimestamp(iso) {
   const seconds = Math.floor(new Date(iso).getTime() / 1000);
-  return `<t:${seconds}:F>`;
+  return `<t:${seconds}:f> (<t:${seconds}:R>)`;
 }
 
 function inButtonCustomId(dropId) {

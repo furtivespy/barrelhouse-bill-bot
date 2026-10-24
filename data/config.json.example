@@ -5,6 +5,7 @@
   "environment": "production",
   "devGuildId": "",
   "botOwnerId": "",
+  "timezone": "America/New_York",
   "defaultSettings": {
     "modRole": "Moderator",
     "adminRole": "Administrator",

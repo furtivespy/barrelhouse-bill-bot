@@ -67,6 +67,7 @@ describe("sample config", () => {
       expect(sample.clientId).toBe("REPLACE_ME_DISCORD_APPLICATION_ID");
       expect(sample.devGuildId).toBe("");
       expect(sample.botOwnerId).toBe("");
+      expect(sample.timezone).toBe("America/New_York");
       expect(sample.token).not.toMatch(/^[A-Za-z0-9._-]{50,}$/);
       expect(resolveDevGuildId(sample, {})).toBeNull();
     }

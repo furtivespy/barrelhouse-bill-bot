@@ -84,10 +84,11 @@ function optionalText(value, field) {
   return text === "" ? null : text;
 }
 
-function optionalBottleLimit(value) {
+function optionalBottleLimit(value, field = "bottleLimit") {
+  const message = `${field} must be a positive integer or omitted`;
   if (value == null || value === "") return null;
   if (typeof value === "boolean") {
-    throw new DropValidationError("bottleLimit must be a positive integer or omitted");
+    throw new DropValidationError(message);
   }
 
   let limit;
@@ -96,15 +97,15 @@ function optionalBottleLimit(value) {
   } else if (typeof value === "string") {
     const text = value.trim();
     if (!/^[1-9]\d*$/.test(text)) {
-      throw new DropValidationError("bottleLimit must be a positive integer or omitted");
+      throw new DropValidationError(message);
     }
     limit = Number(text);
   } else {
-    throw new DropValidationError("bottleLimit must be a positive integer or omitted");
+    throw new DropValidationError(message);
   }
 
   if (!Number.isInteger(limit) || limit < 1) {
-    throw new DropValidationError("bottleLimit must be a positive integer or omitted");
+    throw new DropValidationError(message);
   }
   return limit;
 }
@@ -573,6 +574,10 @@ export {
   SignupNotFoundError,
   DuplicateSignupError,
   DropValidationError,
+  requiredText,
+  optionalText,
+  optionalBottleLimit,
+  optionalTimestamp,
 };
 
 export default DropStore;
