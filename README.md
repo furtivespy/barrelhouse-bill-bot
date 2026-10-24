@@ -3,7 +3,7 @@ Barrelhouse Bill
 
 A Discord bot that likes to drink bourbon. Built from the Stancy starter (Bun, discord.js v14, SQLite per-server settings, container deploy).
 
-Right now the bot answers `/ping`, `/status`, and `/settings`. Group-drop commands come next.
+Right now the bot answers `/ping`, `/status`, `/settings`, and `/drop create`. In-button allocation and the rest of the drop tools come next.
 
 ## Local development
 
@@ -81,7 +81,7 @@ Optional guild / user ids (empty strings in the sample):
 * `devGuildId` — Will's Discord **server** id, if you want slash commands to appear immediately. Leave it `""` to register globally (can take up to an hour).
 * `botOwnerId` — Will's Discord **user** id (optional; otherwise the application owner is used).
 
-No channel ids are required for `/ping` / `/status` / `/settings`.
+No configured channel ids are required for `/ping` / `/status` / `/settings` / `/drop create` (`/drop create` posts in the channel you run it in).
 
 ### 4. Run the container
 
@@ -125,6 +125,7 @@ The image expects:
 * `/ping` - replies with Pong and an **Again** button (proves component routing)
 * `/status` - uptime, package version, and server count
 * `/settings` - administrators view or set `modRole`, `adminRole`, and `systemNotice` per server
+* `/drop create` - mods with Manage Messages post a bottle drop embed and an **In** button (press handling is the next ticket)
 
 ## Dependencies
 
