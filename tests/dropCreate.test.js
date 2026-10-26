@@ -635,17 +635,26 @@ describe("/drop create", () => {
     store.close();
   });
 
-  test("button handler acks with an ephemeral placeholder until FUR-122", async () => {
-    const command = new Drop(dropClient());
+  test("In button customId still routes through the drop command prefix", async () => {
+    const store = memoryDrops();
+    const drop = store.createDrop({
+      guildId: "guild-1",
+      channelId: "channel-1",
+      bottleName: "Eagle Rare",
+      createdBy: "mod-1",
+    });
+    const command = new Drop(dropClient(store));
     const replies = [];
     await command.button({
-      customId: "drop:in:drop-1",
+      customId: inButtonCustomId(drop.id),
+      user: { id: "user-1" },
       reply: async (payload) => replies.push(payload),
     });
     expect(replies[0]).toEqual({
-      content: "Sign-up handling is not available yet.",
+      content: "You're in (#1)",
       flags: MessageFlags.Ephemeral,
     });
-    command.client.drops.close();
+    expect(inButtonCustomId(drop.id).startsWith("drop:")).toBe(true);
+    store.close();
   });
 });

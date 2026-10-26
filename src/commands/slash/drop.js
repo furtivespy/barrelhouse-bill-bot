@@ -5,13 +5,17 @@ import {
   MessageFlags,
 } from "discord.js";
 import SlashCommand from "../../base/SlashCommand.js";
-import { DropValidationError } from "../../db/drops.js";
+import { DropNotFoundError, DropNotOpenError, DropValidationError } from "../../db/drops.js";
 import {
   DROP_COMMAND_NAME,
   DropCreateValidationError,
   buildDropMessage,
+  formatDropClosedReply,
+  formatJoinReply,
   parseDropCreateInput,
+  parseInButtonCustomId,
   readCreateOptions,
+  signupCountsForDrop,
 } from "../../util/dropPost.js";
 import { resolveTimeZone } from "../../util/timeZone.js";
 
@@ -247,12 +251,67 @@ class Drop extends SlashCommand {
     }
   }
 
+  async updatePostedDrop(interaction, drop) {
+    const counts = signupCountsForDrop(this.client?.drops, drop);
+    const payload = buildDropMessage(drop, counts);
+    try {
+      if (typeof interaction?.message?.edit === "function") {
+        await interaction.message.edit(payload);
+        return;
+      }
+      if (drop.messageId && typeof interaction?.channel?.messages?.edit === "function") {
+        await interaction.channel.messages.edit(drop.messageId, payload);
+        return;
+      }
+      this.client?.logger?.error(
+        new Error("no message.edit path for drop sign-up count"),
+        "drop in count update"
+      );
+    } catch (error) {
+      this.client?.logger?.error(error, "drop in count update");
+    }
+  }
+
   async button(interaction) {
-    // Press allocation and live-count edits are FUR-122.
-    await interaction.reply({
-      content: "Sign-up handling is not available yet.",
-      flags: MessageFlags.Ephemeral,
-    });
+    const dropId = parseInButtonCustomId(interaction.customId);
+    if (!dropId) {
+      await replyPrivately(interaction, "Unknown drop action.");
+      return;
+    }
+
+    if (!interaction.user?.id) {
+      await replyPrivately(interaction, "Could not determine who pressed In.");
+      return;
+    }
+
+    const store = this.client?.drops;
+    if (!store || typeof store.joinSignup !== "function") {
+      await replyPrivately(interaction, "Drop storage is not available.");
+      return;
+    }
+
+    if (!interaction.deferred && !interaction.replied && typeof interaction.deferReply === "function") {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    }
+
+    let result;
+    try {
+      result = store.joinSignup(dropId, interaction.user.id);
+    } catch (error) {
+      if (error instanceof DropNotFoundError) {
+        await replyPrivately(interaction, "That drop could not be found.");
+        return;
+      }
+      if (error instanceof DropNotOpenError) {
+        await replyPrivately(interaction, formatDropClosedReply(error.dropStatus));
+        return;
+      }
+      throw error;
+    }
+
+    await replyPrivately(interaction, formatJoinReply(result));
+    await this.updatePostedDrop(interaction, result.drop);
+    return result;
   }
 }
 

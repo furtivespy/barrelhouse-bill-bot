@@ -8,8 +8,10 @@ import DropStore, {
   DROP_STATUSES,
   SIGNUP_STATUSES,
   PICKUP_STATUSES,
+  BUSY_TIMEOUT_MS,
   DuplicateSignupError,
   DropNotFoundError,
+  DropNotOpenError,
   DropValidationError,
   SignupNotFoundError,
 } from "../src/db/drops.js";
@@ -44,6 +46,7 @@ describe("drop store schema", () => {
     try {
       const store = new DropStore({ dataDir });
       expect(store.db.query("PRAGMA user_version").get().user_version).toBe(SCHEMA_VERSION);
+      expect(store.db.query("PRAGMA busy_timeout").get().timeout).toBe(BUSY_TIMEOUT_MS);
       expect(SCHEMA_VERSION).toBe(1);
 
       const tables = store.db
@@ -422,7 +425,7 @@ describe("signup helpers", () => {
         userId: "user-1",
         status: "allocated",
       })
-    ).toThrow(DropValidationError);
+    ).toThrow(DropNotOpenError);
     expect(() =>
       store.createSignup({
         dropId: canceled.id,

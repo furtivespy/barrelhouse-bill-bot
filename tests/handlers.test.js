@@ -2,12 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { Collection, Events, MessageFlags, Routes } from "discord.js";
 import { listJsFiles } from "../src/handlers/discover.js";
 import EventTypes from "../src/base/EventTypes.js";
+import DropStore from "../src/db/drops.js";
 import loadEvents from "../src/handlers/events.js";
 import {
   loadSlashCommands,
   resolveDevGuildId,
   registerSlashCommands,
 } from "../src/handlers/slashcommands.js";
+import { inButtonCustomId } from "../src/util/dropPost.js";
 import path from "path";
 
 function silentLogger() {
@@ -177,10 +179,19 @@ describe("event handler", () => {
 
   test("interactionCreate routes a drop In button by customId prefix", async () => {
     const client = fakeClient();
+    client.drops = new DropStore({ filename: ":memory:" });
+    const drop = client.drops.createDrop({
+      guildId: "guild-1",
+      channelId: "channel-1",
+      bottleName: "Weller Antique",
+      bottleLimit: 2,
+      createdBy: "mod-1",
+    });
     await loadSlashCommands(client);
     await loadEvents(client);
 
     const replies = [];
+    const edits = [];
     await client.registered.interactionCreate.handler({
       isCommand: () => false,
       isChatInputCommand: () => false,
@@ -191,16 +202,26 @@ describe("event handler", () => {
       deferred: false,
       replied: false,
       createdTimestamp: Date.now(),
-      customId: "drop:in:drop-1",
+      customId: inButtonCustomId(drop.id),
       options: { getSubcommand: () => null },
       user: { id: "user-1" },
       reply: async (payload) => {
         replies.push(payload);
       },
+      message: {
+        edit: async (payload) => {
+          edits.push(payload);
+        },
+      },
     });
 
-    expect(replies[0].content).toBe("Sign-up handling is not available yet.");
+    expect(replies[0].content).toBe("You're in (#1)");
     expect(replies[0].flags).toBe(MessageFlags.Ephemeral);
+    expect(edits[0].embeds[0].toJSON().fields).toEqual(
+      expect.arrayContaining([{ name: "Sign-ups", value: "1/2 in, 0 waitlisted", inline: false }])
+    );
+    expect(client.drops.getSignup(drop.id, "user-1").status).toBe("allocated");
+    client.drops.close();
   });
 });
 

@@ -6,6 +6,7 @@ import {
 } from "discord.js";
 import {
   DropValidationError,
+  countSignups,
   optionalBottleLimit,
   optionalText,
   optionalTimestamp,
@@ -106,16 +107,6 @@ function readCreateOptions(interaction) {
   };
 }
 
-function countSignups(signups = []) {
-  let allocated = 0;
-  let waitlisted = 0;
-  for (const signup of signups) {
-    if (signup?.status === "allocated") allocated += 1;
-    if (signup?.status === "waitlist") waitlisted += 1;
-  }
-  return { allocated, waitlisted };
-}
-
 function signupCountsForDrop(store, drop) {
   const signups = typeof store?.listSignups === "function" ? store.listSignups(drop.id) : [];
   return {
@@ -128,6 +119,23 @@ function formatSignupCounts({ allocated = 0, waitlisted = 0, bottleLimit = null 
   const inPart =
     bottleLimit == null ? `${allocated} in` : `${allocated}/${bottleLimit} in`;
   return `${inPart}, ${waitlisted} waitlisted`;
+}
+
+function formatJoinReply({ signup, position } = {}) {
+  if (signup?.status === "allocated") {
+    return `You're in (#${position})`;
+  }
+  if (signup?.status === "waitlist") {
+    return `Waitlisted (#${position})`;
+  }
+  return "You're not currently signed up for this drop.";
+}
+
+function formatDropClosedReply(status) {
+  if (status === "canceled") {
+    return "This drop was canceled.";
+  }
+  return "This drop is closed.";
 }
 
 function discordTimestamp(iso) {
@@ -221,6 +229,8 @@ export {
   countSignups,
   signupCountsForDrop,
   formatSignupCounts,
+  formatJoinReply,
+  formatDropClosedReply,
   discordTimestamp,
   inButtonCustomId,
   parseInButtonCustomId,
