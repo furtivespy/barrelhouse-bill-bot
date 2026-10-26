@@ -15,6 +15,7 @@ import {
   parseDropCreateInput,
   parseInButtonCustomId,
   readCreateOptions,
+  signupCountsForDrop,
 } from "../../util/dropPost.js";
 import { resolveTimeZone } from "../../util/timeZone.js";
 
@@ -250,7 +251,8 @@ class Drop extends SlashCommand {
     }
   }
 
-  async updatePostedDrop(interaction, drop, counts) {
+  async updatePostedDrop(interaction, drop) {
+    const counts = signupCountsForDrop(this.client?.drops, drop);
     const payload = buildDropMessage(drop, counts);
     try {
       if (typeof interaction?.message?.edit === "function") {
@@ -259,7 +261,12 @@ class Drop extends SlashCommand {
       }
       if (drop.messageId && typeof interaction?.channel?.messages?.edit === "function") {
         await interaction.channel.messages.edit(drop.messageId, payload);
+        return;
       }
+      this.client?.logger?.error(
+        new Error("no message.edit path for drop sign-up count"),
+        "drop in count update"
+      );
     } catch (error) {
       this.client?.logger?.error(error, "drop in count update");
     }
@@ -283,6 +290,10 @@ class Drop extends SlashCommand {
       return;
     }
 
+    if (!interaction.deferred && !interaction.replied && typeof interaction.deferReply === "function") {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    }
+
     let result;
     try {
       result = store.joinSignup(dropId, interaction.user.id);
@@ -299,7 +310,7 @@ class Drop extends SlashCommand {
     }
 
     await replyPrivately(interaction, formatJoinReply(result));
-    await this.updatePostedDrop(interaction, result.drop, result.counts);
+    await this.updatePostedDrop(interaction, result.drop);
     return result;
   }
 }

@@ -57,12 +57,30 @@ function buttonInteraction({ dropId, userId, extras = {} }) {
   const replies = [];
   const edits = [];
   const channelEdits = [];
+  const defers = [];
+  const editReplies = [];
+  const followUps = [];
   const interaction = {
     customId: inButtonCustomId(dropId),
     user: { id: userId },
     replies,
     edits,
     channelEdits,
+    defers,
+    editReplies,
+    followUps,
+    deferred: false,
+    replied: false,
+    deferReply: async (payload) => {
+      defers.push(payload);
+      interaction.deferred = true;
+    },
+    editReply: async (payload) => {
+      editReplies.push(payload);
+    },
+    followUp: async (payload) => {
+      followUps.push(payload);
+    },
     reply: async (payload) => {
       replies.push(payload);
       interaction.replied = true;
@@ -85,6 +103,14 @@ function buttonInteraction({ dropId, userId, extras = {} }) {
     ...extras,
   };
   return interaction;
+}
+
+function privatePayload(interaction) {
+  return interaction.editReplies[0] || interaction.followUps[0] || interaction.replies[0];
+}
+
+function signupField(payload) {
+  return payload.embeds[0].toJSON().fields.find((field) => field.name === "Sign-ups").value;
 }
 
 async function pressIn(command, dropId, userId, extras = {}) {
@@ -354,14 +380,9 @@ describe("In button handler", () => {
     const first = await pressIn(command, drop.id, "user-1");
     const second = await pressIn(command, drop.id, "user-2");
 
-    expect(first.interaction.replies[0]).toEqual({
-      content: "You're in (#1)",
-      flags: MessageFlags.Ephemeral,
-    });
-    expect(second.interaction.replies[0]).toEqual({
-      content: "You're in (#2)",
-      flags: MessageFlags.Ephemeral,
-    });
+    expect(first.interaction.defers[0]).toEqual({ flags: MessageFlags.Ephemeral });
+    expect(privatePayload(first.interaction)).toEqual({ content: "You're in (#1)" });
+    expect(privatePayload(second.interaction)).toEqual({ content: "You're in (#2)" });
     expect(store.getSignup(drop.id, "user-1").status).toBe("allocated");
     store.close();
   });
@@ -374,10 +395,8 @@ describe("In button handler", () => {
     await pressIn(command, drop.id, "user-1");
     const waitlisted = await pressIn(command, drop.id, "user-2");
 
-    expect(waitlisted.interaction.replies[0]).toEqual({
-      content: "Waitlisted (#1)",
-      flags: MessageFlags.Ephemeral,
-    });
+    expect(waitlisted.interaction.defers[0]).toEqual({ flags: MessageFlags.Ephemeral });
+    expect(privatePayload(waitlisted.interaction)).toEqual({ content: "Waitlisted (#1)" });
     expect(store.getSignup(drop.id, "user-2").status).toBe("waitlist");
     store.close();
   });
@@ -390,7 +409,7 @@ describe("In button handler", () => {
     const replies = [];
     for (const userId of ["a", "b", "c"]) {
       const { interaction } = await pressIn(command, drop.id, userId);
-      replies.push(interaction.replies[0].content);
+      replies.push(privatePayload(interaction).content);
     }
 
     expect(replies).toEqual(["You're in (#1)", "You're in (#2)", "You're in (#3)"]);
@@ -408,8 +427,8 @@ describe("In button handler", () => {
     const allocatedAgain = await pressIn(command, drop.id, "user-1");
     const waitlistedAgain = await pressIn(command, drop.id, "user-2");
 
-    expect(allocatedAgain.interaction.replies[0].content).toBe("You're in (#1)");
-    expect(waitlistedAgain.interaction.replies[0].content).toBe("Waitlisted (#1)");
+    expect(privatePayload(allocatedAgain.interaction).content).toBe("You're in (#1)");
+    expect(privatePayload(waitlistedAgain.interaction).content).toBe("Waitlisted (#1)");
     expect(allocatedAgain.result.created).toBe(false);
     expect(store.listSignups(drop.id)).toHaveLength(2);
     store.close();
@@ -428,13 +447,10 @@ describe("In button handler", () => {
     const closedPress = await pressIn(command, closed.id, "user-1");
     const canceledPress = await pressIn(command, canceled.id, "user-1");
 
-    expect(closedPress.interaction.replies[0]).toEqual({
-      content: "This drop is closed.",
-      flags: MessageFlags.Ephemeral,
-    });
-    expect(canceledPress.interaction.replies[0]).toEqual({
+    expect(closedPress.interaction.defers[0]).toEqual({ flags: MessageFlags.Ephemeral });
+    expect(privatePayload(closedPress.interaction)).toEqual({ content: "This drop is closed." });
+    expect(privatePayload(canceledPress.interaction)).toEqual({
       content: "This drop was canceled.",
-      flags: MessageFlags.Ephemeral,
     });
     expect(closedPress.interaction.edits).toEqual([]);
     expect(store.listSignups(closed.id)).toEqual([]);
@@ -452,10 +468,9 @@ describe("In button handler", () => {
     const third = await pressIn(command, drop.id, "user-3");
     const duplicate = await pressIn(command, drop.id, "user-1");
 
-    const counts = [first, second, third, duplicate].map((press) => {
-      const embed = press.interaction.edits[0].embeds[0].toJSON();
-      return embed.fields.find((field) => field.name === "Sign-ups").value;
-    });
+    const counts = [first, second, third, duplicate].map((press) =>
+      signupField(press.interaction.edits[0])
+    );
 
     expect(counts).toEqual([
       formatSignupCounts({ allocated: 1, waitlisted: 0, bottleLimit: 2 }),
@@ -466,6 +481,103 @@ describe("In button handler", () => {
     expect(first.interaction.edits[0].components[0].toJSON().components[0].custom_id).toBe(
       inButtonCustomId(drop.id)
     );
+    store.close();
+  });
+
+  test("overlapping In presses re-read counts so the final embed is not an undercount", async () => {
+    const store = memoryDrops();
+    const drop = store.createDrop(sampleDrop({ bottleLimit: 5, messageId: "msg-drop" }));
+    const command = new Drop(dropClient(store));
+
+    const sharedEdits = [];
+    const sharedMessage = {
+      id: "msg-drop",
+      edit: async (payload) => {
+        sharedEdits.push(payload);
+        return payload;
+      },
+    };
+
+    let releaseFirstReply;
+    const firstReplyHeld = new Promise((resolve) => {
+      releaseFirstReply = resolve;
+    });
+    let firstHeldAtReply;
+    const firstAtReply = new Promise((resolve) => {
+      firstHeldAtReply = resolve;
+    });
+
+    const first = buttonInteraction({
+      dropId: drop.id,
+      userId: "user-a",
+      extras: {
+        message: sharedMessage,
+        editReply: async (payload) => {
+          first.editReplies.push(payload);
+          firstHeldAtReply();
+          await firstReplyHeld;
+        },
+      },
+    });
+
+    const firstPress = command.button(first);
+    await firstAtReply;
+
+    await pressIn(command, drop.id, "user-b", { message: sharedMessage });
+    releaseFirstReply();
+    await firstPress;
+
+    expect(store.listSignups(drop.id)).toHaveLength(2);
+    expect(sharedEdits.length).toBeGreaterThanOrEqual(2);
+    expect(signupField(sharedEdits.at(-1))).toBe(
+      formatSignupCounts({ allocated: 2, waitlisted: 0, bottleLimit: 5 })
+    );
+    store.close();
+  });
+
+  test("acks with deferReply before joinSignup waits on the store lock", async () => {
+    const store = memoryDrops();
+    const drop = store.createDrop(sampleDrop({ messageId: "msg-drop" }));
+    const command = new Drop(dropClient(store));
+    const order = [];
+    const originalJoin = store.joinSignup.bind(store);
+
+    const interaction = buttonInteraction({ dropId: drop.id, userId: "user-1" });
+    const originalDefer = interaction.deferReply;
+    interaction.deferReply = async (payload) => {
+      order.push("defer");
+      return originalDefer(payload);
+    };
+    store.joinSignup = (...args) => {
+      order.push(interaction.deferred ? "join-after-ack" : "join-before-ack");
+      return originalJoin(...args);
+    };
+
+    await command.button(interaction);
+
+    expect(order).toEqual(["defer", "join-after-ack"]);
+    expect(interaction.defers[0]).toEqual({ flags: MessageFlags.Ephemeral });
+    expect(privatePayload(interaction)).toEqual({ content: "You're in (#1)" });
+    store.close();
+  });
+
+  test("uses followUp for the status message when the interaction was already replied", async () => {
+    const store = memoryDrops();
+    const drop = store.createDrop(sampleDrop({ messageId: "msg-drop" }));
+    const command = new Drop(dropClient(store));
+    const { interaction } = await pressIn(command, drop.id, "user-1", {
+      replied: true,
+      deferred: false,
+      deferReply: async () => {
+        throw new Error("should not defer after reply");
+      },
+    });
+
+    expect(interaction.followUps[0]).toEqual({
+      content: "You're in (#1)",
+      flags: MessageFlags.Ephemeral,
+    });
+    expect(interaction.editReplies).toEqual([]);
     store.close();
   });
 
@@ -535,9 +647,25 @@ describe("In button handler", () => {
       },
     });
 
-    expect(interaction.replies[0].content).toBe("You're in (#1)");
+    expect(privatePayload(interaction).content).toBe("You're in (#1)");
     expect(store.getSignup(drop.id, "user-1").status).toBe("allocated");
     expect(String(logger.errors[0]?.message || logger.errors[0])).toMatch(/Missing Permissions/);
+    store.close();
+  });
+
+  test("logs when the live-count edit has no message path", async () => {
+    const store = memoryDrops();
+    const drop = store.createDrop(sampleDrop({ messageId: "msg-drop" }));
+    const logger = silentLogger();
+    const command = new Drop(dropClient(store, { logger }));
+
+    await pressIn(command, drop.id, "user-1", {
+      message: {},
+      channel: {},
+    });
+
+    expect(store.getSignup(drop.id, "user-1").status).toBe("allocated");
+    expect(String(logger.errors[0]?.message || logger.errors[0])).toMatch(/no message\.edit path/);
     store.close();
   });
 });

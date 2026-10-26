@@ -6,6 +6,7 @@ import {
 } from "discord.js";
 import {
   DropValidationError,
+  countSignups,
   optionalBottleLimit,
   optionalText,
   optionalTimestamp,
@@ -104,16 +105,6 @@ function readCreateOptions(interaction) {
     closeTime: options.getString?.("close_time"),
     description: options.getString?.("description"),
   };
-}
-
-function countSignups(signups = []) {
-  let allocated = 0;
-  let waitlisted = 0;
-  for (const signup of signups) {
-    if (signup?.status === "allocated") allocated += 1;
-    if (signup?.status === "waitlist") waitlisted += 1;
-  }
-  return { allocated, waitlisted };
 }
 
 function signupCountsForDrop(store, drop) {

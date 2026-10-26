@@ -314,16 +314,19 @@ function signupPosition(signups, userId) {
   return index === -1 ? null : index + 1;
 }
 
-function signupCountsFromRows(signups, bottleLimit) {
+function countSignups(signups = []) {
   let allocated = 0;
   let waitlisted = 0;
   for (const signup of signups) {
-    if (signup.status === "allocated") allocated += 1;
-    if (signup.status === "waitlist") waitlisted += 1;
+    if (signup?.status === "allocated") allocated += 1;
+    if (signup?.status === "waitlist") waitlisted += 1;
   }
+  return { allocated, waitlisted };
+}
+
+function signupCountsFromRows(signups, bottleLimit) {
   return {
-    allocated,
-    waitlisted,
+    ...countSignups(signups),
     bottleLimit: bottleLimit ?? null,
   };
 }
@@ -697,8 +700,7 @@ export {
   optionalText,
   optionalBottleLimit,
   optionalTimestamp,
-  signupPosition,
-  signupCountsFromRows,
+  countSignups,
 };
 
 export default DropStore;
