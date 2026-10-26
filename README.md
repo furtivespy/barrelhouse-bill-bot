@@ -3,7 +3,7 @@ Barrelhouse Bill
 
 A Discord bot that likes to drink bourbon. Built from the Stancy starter (Bun, discord.js v14, SQLite per-server settings, container deploy).
 
-Right now the bot answers `/ping`, `/status`, and `/settings`. Group-drop commands come next.
+Right now the bot answers `/ping`, `/status`, `/settings`, and `/drop create`. In-button allocation and the rest of the drop tools come next.
 
 ## Local development
 
@@ -25,6 +25,7 @@ Optional:
 * `bugsnagKey` (config) — when set, `error` logs are reported to Bugsnag. When unset, blank, or the placeholder `abc123`, the logger stays on the console only.
 * `defaultSettings` — per-server defaults (`modRole`, `adminRole`, `systemNotice`) merged with guild overrides stored in SQLite
 * `botOwnerId` — Discord user id treated as Bot Owner for permission checks. If unset, the Discord application owner (fetched on `clientReady`) is used.
+* `timezone` — IANA zone used when `/drop create` is given a close time without `Z` or an offset. Defaults to `America/New_York` (Syracuse). Explicit `Z` / offsets are honored as written.
 * `BILL_DATA_DIR` (env) — local directory for SQLite files (defaults to `./data`). In a container this is always `/data`.
 * `DEV_GUILD_ID` (env) or `devGuildId` (config) — register slash commands to this guild instead of globally. Instant updates while developing. If neither is set, commands register globally (and development logs a warning). There is no hardcoded fallback guild.
 * `OTEL_EXPORTER_OTLP_ENDPOINT` (env) — optional OpenTelemetry. Tracing is off unless this endpoint is set.
@@ -81,7 +82,7 @@ Optional guild / user ids (empty strings in the sample):
 * `devGuildId` — Will's Discord **server** id, if you want slash commands to appear immediately. Leave it `""` to register globally (can take up to an hour).
 * `botOwnerId` — Will's Discord **user** id (optional; otherwise the application owner is used).
 
-No channel ids are required for `/ping` / `/status` / `/settings`.
+No configured channel ids are required for `/ping` / `/status` / `/settings` / `/drop create` (`/drop create` posts in the channel you run it in).
 
 ### 4. Run the container
 
@@ -107,7 +108,7 @@ Confirm `/ping` answers in Discord. If commands are missing, set `devGuildId` / 
 
 ### GitHub Actions
 
-* `test.yml` — `bun test` **and** a no-push Docker image build on every push and pull request
+* `test.yml` — `bun test` under `TZ=UTC` and `TZ=America/New_York` **and** a no-push Docker image build on every push and pull request
 * `build-push.yml` — build and push a commit-SHA tag on push to `main` (also `workflow_dispatch`)
 * `release.yml` — on merge to `main`, semver-tag and push `vX.Y.Z` + `latest`
 
@@ -125,6 +126,7 @@ The image expects:
 * `/ping` - replies with Pong and an **Again** button (proves component routing)
 * `/status` - uptime, package version, and server count
 * `/settings` - administrators view or set `modRole`, `adminRole`, and `systemNotice` per server
+* `/drop create` - mods with Manage Messages post a bottle drop embed and an **In** button (press handling is the next ticket)
 
 ## Dependencies
 
