@@ -634,6 +634,16 @@ class DropStore {
     return this.getSignup(signup.dropId, signup.userId);
   }
 
+  // Assumes the caller already holds a write transaction (BEGIN IMMEDIATE).
+  rejoinRemovedSignup(drop, userId, joinedAt) {
+    const status = this.hasAllocationRoom(drop) ? "allocated" : "waitlist";
+    return this.updateSignup(drop.id, userId, {
+      status,
+      pickupStatus: "pending",
+      joinedAt,
+    });
+  }
+
   joinOutcome(drop, signup, created) {
     const signups = this.listSignups(drop.id);
     return {
@@ -689,8 +699,13 @@ class DropStore {
       }
 
       const existing = this.getSignup(drop.id, resolvedUserId);
-      if (existing) {
+      if (existing && existing.status !== "removed") {
         return this.joinOutcome(drop, existing, false);
+      }
+
+      const at = joinedAt || new Date().toISOString();
+      if (existing?.status === "removed") {
+        return this.joinOutcome(drop, this.rejoinRemovedSignup(drop, resolvedUserId, at), true);
       }
 
       const status = this.hasAllocationRoom(drop) ? "allocated" : "waitlist";
@@ -699,7 +714,7 @@ class DropStore {
         const signup = this.insertSignupRecord({
           dropId: drop.id,
           userId: resolvedUserId,
-          joinedAt: joinedAt || new Date().toISOString(),
+          joinedAt: at,
           status,
           pickupStatus: "pending",
           removedBy: null,
@@ -709,6 +724,9 @@ class DropStore {
       } catch (error) {
         if (error instanceof DuplicateSignupError) {
           const raced = this.getSignup(drop.id, resolvedUserId);
+          if (raced?.status === "removed") {
+            return this.joinOutcome(drop, this.rejoinRemovedSignup(drop, resolvedUserId, at), true);
+          }
           if (raced) {
             return this.joinOutcome(drop, raced, false);
           }
@@ -739,6 +757,10 @@ class DropStore {
 
     const next = normalizeSignupRemoval({
       ...existing,
+      joinedAt:
+        patch.joinedAt !== undefined
+          ? optionalTimestamp(patch.joinedAt, "joinedAt") || existing.joinedAt
+          : existing.joinedAt,
       status: patch.status !== undefined ? oneOf(patch.status, SIGNUP_STATUSES, "status") : existing.status,
       pickupStatus:
         patch.pickupStatus !== undefined
@@ -752,10 +774,18 @@ class DropStore {
     this.db
       .query(
         `UPDATE signups SET
-          status = ?, pickup_status = ?, removed_by = ?, removed_at = ?
+          joined_at = ?, status = ?, pickup_status = ?, removed_by = ?, removed_at = ?
         WHERE drop_id = ? AND user_id = ?`
       )
-      .run(next.status, next.pickupStatus, next.removedBy, next.removedAt, existing.dropId, existing.userId);
+      .run(
+        next.joinedAt,
+        next.status,
+        next.pickupStatus,
+        next.removedBy,
+        next.removedAt,
+        existing.dropId,
+        existing.userId
+      );
 
     return this.getSignup(existing.dropId, existing.userId);
   }

@@ -22,6 +22,7 @@ import {
   resolveModDrop,
   rosterSections,
 } from "../src/util/dropMod.js";
+import { inButtonCustomId } from "../src/util/dropPost.js";
 
 function silentLogger() {
   return {
@@ -465,6 +466,54 @@ describe("/drop list, remove, pickup, export", () => {
     store.close();
   });
 
+  test("pressing In after /drop remove re-signs as a fresh join", async () => {
+    const store = memoryDrops();
+    seedLimitedDrop(store);
+    const command = new Drop(dropClient(store));
+    const remove = commandInteraction({
+      subcommand: "remove",
+      values: { user: { id: "user-1" } },
+    });
+    await command.execute(remove);
+
+    expect(store.getSignup("drop-1", "user-1")).toMatchObject({
+      status: "removed",
+      removedBy: "mod-1",
+    });
+    expect(store.getSignup("drop-1", "user-3").status).toBe("allocated");
+
+    const editReplies = [];
+    const defers = [];
+    const interaction = {
+      customId: inButtonCustomId("drop-1"),
+      guildId: "guild-1",
+      user: { id: "user-1" },
+      memberPermissions: managePerms(false),
+      deferred: false,
+      replied: false,
+      deferReply: async (payload) => {
+        defers.push(payload);
+        interaction.deferred = true;
+      },
+      editReply: async (payload) => editReplies.push(payload),
+      message: { edit: async () => {} },
+    };
+    const result = await command.button(interaction);
+
+    expect(defers[0]).toEqual({ flags: MessageFlags.Ephemeral });
+    expect(editReplies[0].content).toBe("Waitlisted (#1)");
+    expect(editReplies[0].content).not.toBe("You're not currently signed up for this drop.");
+    expect(result.created).toBe(true);
+    expect(store.getSignup("drop-1", "user-1")).toMatchObject({
+      status: "waitlist",
+      pickupStatus: "pending",
+      removedBy: null,
+      removedAt: null,
+    });
+    expect(store.listSignups("drop-1")).toHaveLength(3);
+    store.close();
+  });
+
   test("pickup subcommand marks picked up and no-show", async () => {
     const store = memoryDrops();
     seedLimitedDrop(store);
@@ -475,6 +524,7 @@ describe("/drop list, remove, pickup, export", () => {
       values: { user: { id: "user-1" }, status: "picked_up" },
     });
     await command.execute(picked);
+    expect(picked.defers[0]).toEqual({ flags: MessageFlags.Ephemeral });
     expect(store.getSignup("drop-1", "user-1").pickupStatus).toBe("picked_up");
     expect(privatePayload(picked).content).toBe("Marked <@user-1> as picked up.");
 
@@ -499,23 +549,117 @@ describe("/drop list, remove, pickup, export", () => {
     const store = memoryDrops();
     seedLimitedDrop(store);
     const command = new Drop(dropClient(store));
-    const updates = [];
     const interaction = {
       customId: pickupButtonCustomId("drop-1", "user-2", "picked_up"),
+      guildId: "guild-1",
       user: { id: "mod-1" },
       memberPermissions: managePerms(true),
       deferred: false,
       replied: false,
-      update: async (payload) => {
-        updates.push(payload);
+      defers: [],
+      editReplies: [],
+      deferReply: async (payload) => {
+        interaction.defers.push(payload);
+        interaction.deferred = true;
+      },
+      editReply: async (payload) => {
+        interaction.editReplies.push(payload);
+      },
+      update: async () => {
+        throw new Error("should not update after defer");
       },
     };
 
     await command.button(interaction);
 
     expect(store.getSignup("drop-1", "user-2").pickupStatus).toBe("picked_up");
-    expect(updates).toHaveLength(1);
-    expect(updates[0].embeds[0].toJSON().description).toContain("<@user-2> — picked up");
+    expect(interaction.defers[0]).toEqual({ flags: MessageFlags.Ephemeral });
+    expect(interaction.editReplies[0].content).toBe("Marked <@user-2> as picked up.");
+    expect(interaction.editReplies[0].embeds[0].toJSON().description).toContain("<@user-2> — picked up");
+    store.close();
+  });
+
+  test("pickup buttons reject a drop from another guild", async () => {
+    const store = memoryDrops();
+    seedLimitedDrop(store);
+    const command = new Drop(dropClient(store));
+    const interaction = {
+      customId: pickupButtonCustomId("drop-1", "user-1", "picked_up"),
+      guildId: "guild-2",
+      user: { id: "mod-1" },
+      memberPermissions: managePerms(true),
+      deferred: false,
+      replied: false,
+      defers: [],
+      editReplies: [],
+      deferReply: async (payload) => {
+        interaction.defers.push(payload);
+        interaction.deferred = true;
+      },
+      editReply: async (payload) => {
+        interaction.editReplies.push(payload);
+      },
+    };
+
+    await command.button(interaction);
+
+    expect(interaction.defers[0]).toEqual({ flags: MessageFlags.Ephemeral });
+    expect(privatePayload(interaction).content).toBe("That drop is not in this server.");
+    expect(store.getSignup("drop-1", "user-1").pickupStatus).toBe("pending");
+    store.close();
+  });
+
+  test("pickup command and buttons ack with deferReply before setPickupStatus", async () => {
+    const store = memoryDrops();
+    seedLimitedDrop(store);
+    const command = new Drop(dropClient(store));
+    const originalSet = store.setPickupStatus.bind(store);
+
+    const slashOrder = [];
+    const slash = commandInteraction({
+      subcommand: "pickup",
+      values: { user: { id: "user-1" }, status: "picked_up" },
+    });
+    const originalSlashDefer = slash.deferReply;
+    slash.deferReply = async (payload) => {
+      slashOrder.push("defer");
+      return originalSlashDefer(payload);
+    };
+    store.setPickupStatus = (...args) => {
+      slashOrder.push(slash.deferred ? "set-after-ack" : "set-before-ack");
+      return originalSet(...args);
+    };
+    await command.execute(slash);
+    expect(slashOrder).toEqual(["defer", "set-after-ack"]);
+    expect(slash.defers[0]).toEqual({ flags: MessageFlags.Ephemeral });
+
+    const buttonOrder = [];
+    store.setPickupStatus = (...args) => {
+      buttonOrder.push(button.deferred ? "set-after-ack" : "set-before-ack");
+      return originalSet(...args);
+    };
+    const button = {
+      customId: pickupButtonCustomId("drop-1", "user-2", "no_show"),
+      guildId: "guild-1",
+      user: { id: "mod-1" },
+      memberPermissions: managePerms(true),
+      deferred: false,
+      replied: false,
+      defers: [],
+      editReplies: [],
+      deferReply: async (payload) => {
+        buttonOrder.push("defer");
+        button.defers.push(payload);
+        button.deferred = true;
+      },
+      editReply: async (payload) => {
+        button.editReplies.push(payload);
+      },
+    };
+    await command.button(button);
+    expect(buttonOrder).toEqual(["defer", "set-after-ack"]);
+    expect(button.defers[0]).toEqual({ flags: MessageFlags.Ephemeral });
+    expect(store.getSignup("drop-1", "user-2").pickupStatus).toBe("no_show");
     store.close();
   });
 
@@ -526,6 +670,7 @@ describe("/drop list, remove, pickup, export", () => {
     const replies = [];
     await command.button({
       customId: pickupButtonCustomId("drop-1", "user-1", "no_show"),
+      guildId: "guild-1",
       user: { id: "user-9" },
       memberPermissions: managePerms(false),
       reply: async (payload) => replies.push(payload),

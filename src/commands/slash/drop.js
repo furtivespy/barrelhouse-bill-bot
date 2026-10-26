@@ -38,6 +38,16 @@ import {
 } from "../../util/dropPost.js";
 import { resolveTimeZone } from "../../util/timeZone.js";
 
+function addDropOption(subcommand) {
+  return subcommand.addStringOption((option) =>
+    option
+      .setName("drop")
+      .setDescription("Drop id or bottle name (defaults to this channel)")
+      .setRequired(false)
+      .setAutocomplete(true)
+  );
+}
+
 async function replyPrivately(interaction, content, extras = {}) {
   const payload = { flags: MessageFlags.Ephemeral, ...extras };
   if (content != null && content !== "") {
@@ -58,6 +68,22 @@ async function replyPrivately(interaction, content, extras = {}) {
   if (typeof interaction?.reply === "function") {
     await interaction.reply(payload);
   }
+}
+
+async function deferPrivately(interaction) {
+  if (!interaction.deferred && !interaction.replied && typeof interaction.deferReply === "function") {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  }
+}
+
+function dropCommandErrorMessage(error) {
+  if (error instanceof SignupNotFoundError) {
+    return "That person is not on this drop.";
+  }
+  if (error instanceof DropValidationError || error instanceof DropNotFoundError) {
+    return error.message;
+  }
+  return null;
 }
 
 async function tryReplyPrivately(interaction, content, logger) {
@@ -164,69 +190,49 @@ class Drop extends SlashCommand {
           )
       )
       .addSubcommand((subcommand) =>
-        subcommand
-          .setName("list")
-          .setDescription("Show the allocated list and waitlist (mods only)")
-          .addStringOption((option) =>
-            option
-              .setName("drop")
-              .setDescription("Drop id or bottle name (defaults to this channel)")
-              .setRequired(false)
-              .setAutocomplete(true)
-          )
+        addDropOption(
+          subcommand
+            .setName("list")
+            .setDescription("Show the allocated list and waitlist (mods only)")
+        )
       )
       .addSubcommand((subcommand) =>
-        subcommand
-          .setName("remove")
-          .setDescription("Remove someone from the list (mods only)")
-          .addUserOption((option) =>
-            option.setName("user").setDescription("Person to remove").setRequired(true)
-          )
-          .addStringOption((option) =>
-            option
-              .setName("drop")
-              .setDescription("Drop id or bottle name (defaults to this channel)")
-              .setRequired(false)
-              .setAutocomplete(true)
-          )
+        addDropOption(
+          subcommand
+            .setName("remove")
+            .setDescription("Remove someone from the list (mods only)")
+            .addUserOption((option) =>
+              option.setName("user").setDescription("Person to remove").setRequired(true)
+            )
+        )
       )
       .addSubcommand((subcommand) =>
-        subcommand
-          .setName("pickup")
-          .setDescription("Mark someone picked up or no-show (mods only)")
-          .addUserOption((option) =>
-            option.setName("user").setDescription("Person to mark").setRequired(true)
-          )
-          .addStringOption((option) =>
-            option
-              .setName("status")
-              .setDescription("Pickup status")
-              .setRequired(true)
-              .addChoices(
-                { name: "Picked up", value: "picked_up" },
-                { name: "No-show", value: "no_show" },
-                { name: "Pending", value: "pending" }
-              )
-          )
-          .addStringOption((option) =>
-            option
-              .setName("drop")
-              .setDescription("Drop id or bottle name (defaults to this channel)")
-              .setRequired(false)
-              .setAutocomplete(true)
-          )
+        addDropOption(
+          subcommand
+            .setName("pickup")
+            .setDescription("Mark someone picked up or no-show (mods only)")
+            .addUserOption((option) =>
+              option.setName("user").setDescription("Person to mark").setRequired(true)
+            )
+            .addStringOption((option) =>
+              option
+                .setName("status")
+                .setDescription("Pickup status")
+                .setRequired(true)
+                .addChoices(
+                  { name: "Picked up", value: "picked_up" },
+                  { name: "No-show", value: "no_show" },
+                  { name: "Pending", value: "pending" }
+                )
+            )
+        )
       )
       .addSubcommand((subcommand) =>
-        subcommand
-          .setName("export")
-          .setDescription("Download a CSV of everyone on the drop (mods only)")
-          .addStringOption((option) =>
-            option
-              .setName("drop")
-              .setDescription("Drop id or bottle name (defaults to this channel)")
-              .setRequired(false)
-              .setAutocomplete(true)
-          )
+        addDropOption(
+          subcommand
+            .setName("export")
+            .setDescription("Download a CSV of everyone on the drop (mods only)")
+        )
       );
   }
 
@@ -393,8 +399,9 @@ class Drop extends SlashCommand {
       await replyPrivately(interaction, null, payload);
       return drop;
     } catch (error) {
-      if (error instanceof DropValidationError || error instanceof DropNotFoundError) {
-        await replyPrivately(interaction, error.message);
+      const message = dropCommandErrorMessage(error);
+      if (message) {
+        await replyPrivately(interaction, message);
         return;
       }
       throw error;
@@ -416,9 +423,7 @@ class Drop extends SlashCommand {
       return;
     }
 
-    if (!interaction.deferred && !interaction.replied && typeof interaction.deferReply === "function") {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    }
+    await deferPrivately(interaction);
 
     try {
       const store = this.requireDropStore();
@@ -428,12 +433,9 @@ class Drop extends SlashCommand {
       await this.updatePostedDrop(interaction, result.drop);
       return result;
     } catch (error) {
-      if (error instanceof SignupNotFoundError) {
-        await replyPrivately(interaction, "That person is not on this drop.");
-        return;
-      }
-      if (error instanceof DropValidationError || error instanceof DropNotFoundError) {
-        await replyPrivately(interaction, error.message);
+      const message = dropCommandErrorMessage(error);
+      if (message) {
+        await replyPrivately(interaction, message);
         return;
       }
       throw error;
@@ -452,6 +454,8 @@ class Drop extends SlashCommand {
       return;
     }
 
+    await deferPrivately(interaction);
+
     try {
       const store = this.requireDropStore();
       const drop = this.resolveCommandDrop(interaction);
@@ -459,12 +463,9 @@ class Drop extends SlashCommand {
       await replyPrivately(interaction, formatPickupReply(result.signup));
       return result;
     } catch (error) {
-      if (error instanceof SignupNotFoundError) {
-        await replyPrivately(interaction, "That person is not on this drop.");
-        return;
-      }
-      if (error instanceof DropValidationError || error instanceof DropNotFoundError) {
-        await replyPrivately(interaction, error.message);
+      const message = dropCommandErrorMessage(error);
+      if (message) {
+        await replyPrivately(interaction, message);
         return;
       }
       throw error;
@@ -484,8 +485,9 @@ class Drop extends SlashCommand {
       await replyPrivately(interaction, `CSV for ${drop.bottleName}.`, { files: [file] });
       return drop;
     } catch (error) {
-      if (error instanceof DropValidationError || error instanceof DropNotFoundError) {
-        await replyPrivately(interaction, error.message);
+      const message = dropCommandErrorMessage(error);
+      if (message) {
+        await replyPrivately(interaction, message);
         return;
       }
       throw error;
@@ -522,7 +524,19 @@ class Drop extends SlashCommand {
       return;
     }
 
+    await deferPrivately(interaction);
+
     try {
+      const drop = typeof store.getDrop === "function" ? store.getDrop(pickup.dropId) : undefined;
+      if (!drop) {
+        await replyPrivately(interaction, "That drop could not be found.");
+        return;
+      }
+      if (drop.guildId !== interaction.guildId) {
+        await replyPrivately(interaction, "That drop is not in this server.");
+        return;
+      }
+
       const result = store.setPickupStatus(pickup.dropId, pickup.userId, pickup.pickupStatus);
       const payload = buildModListPayload(result.drop, store.listSignups(result.drop.id));
       if (typeof interaction.update === "function" && !interaction.deferred && !interaction.replied) {
@@ -532,12 +546,9 @@ class Drop extends SlashCommand {
       await replyPrivately(interaction, formatPickupReply(result.signup), payload);
       return result;
     } catch (error) {
-      if (error instanceof SignupNotFoundError) {
-        await replyPrivately(interaction, "That person is not on this drop.");
-        return;
-      }
-      if (error instanceof DropValidationError || error instanceof DropNotFoundError) {
-        await replyPrivately(interaction, error.message);
+      const message = dropCommandErrorMessage(error);
+      if (message) {
+        await replyPrivately(interaction, message);
         return;
       }
       throw error;
@@ -588,9 +599,7 @@ class Drop extends SlashCommand {
       return;
     }
 
-    if (!interaction.deferred && !interaction.replied && typeof interaction.deferReply === "function") {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    }
+    await deferPrivately(interaction);
 
     let result;
     try {
