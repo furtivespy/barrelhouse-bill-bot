@@ -3,7 +3,7 @@ Barrelhouse Bill
 
 A Discord bot that likes to drink bourbon. Built from the Stancy starter (Bun, discord.js v14, SQLite per-server settings, container deploy).
 
-Right now the bot answers `/ping`, `/status`, `/settings`, and `/drop create`. Pressing **In** allocates a bottle first-come, first-served, or waitlists you once the limit is reached. The rest of the drop tools come next.
+Right now the bot answers `/ping`, `/status`, `/settings`, `/drop create`, and the mod drop tools (`/drop list`, `/drop remove`, `/drop pickup`, `/drop export`). Pressing **In** allocates a bottle first-come, first-served, or waitlists you once the limit is reached. Close/cancel come next.
 
 ## Local development
 
@@ -127,6 +127,7 @@ The image expects:
 * `/status` - uptime, package version, and server count
 * `/settings` - administrators view or set `modRole`, `adminRole`, and `systemNotice` per server
 * `/drop create` - mods with Manage Messages post a bottle drop embed and an **In** button. Pressing **In** signs you up (allocated or waitlisted) and updates the live count.
+* `/drop list` / `/drop remove` / `/drop pickup` / `/drop export` - mods list sign-ups, remove people (waitlist moves up), mark pickups/no-shows, and download a CSV
 
 ## Dependencies
 
