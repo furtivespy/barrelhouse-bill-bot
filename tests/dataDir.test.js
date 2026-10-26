@@ -24,18 +24,18 @@ describe("resolveDataDir", () => {
     expect(
       resolveDataDir({
         IS_IN_CONTAINER: "true",
-        STANCY_DATA_DIR: "/tmp/should-not-win",
+        BILL_DATA_DIR: "/tmp/should-not-win",
       })
     ).toBe(CONTAINER_DATA_DIR);
   });
 
-  test("uses STANCY_DATA_DIR when running locally", () => {
-    expect(resolveDataDir({ STANCY_DATA_DIR: "/tmp/stancy-data" })).toBe(
-      path.resolve("/tmp/stancy-data")
+  test("uses BILL_DATA_DIR when running locally", () => {
+    expect(resolveDataDir({ BILL_DATA_DIR: "/tmp/bill-data" })).toBe(
+      path.resolve("/tmp/bill-data")
     );
   });
 
-  test("defaults to ./data when running locally without STANCY_DATA_DIR", () => {
+  test("defaults to ./data when running locally without BILL_DATA_DIR", () => {
     expect(resolveDataDir({})).toBe(path.resolve("./data"));
   });
 });

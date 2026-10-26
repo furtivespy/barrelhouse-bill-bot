@@ -1,8 +1,8 @@
 {
-  "name": "discord-bot-gwj",
+  "name": "barrelhouse-bill-bot",
   "version": "1.0.0",
   "packageManager": "bun@1.4.3",
-  "description": "Discord Bot for GWJ",
+  "description": "Discord bot that likes to drink bourbon",
   "type": "module",
   "main": "src/bot.js",
   "scripts": {

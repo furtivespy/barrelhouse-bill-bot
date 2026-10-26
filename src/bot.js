@@ -37,13 +37,11 @@ const partials = [Partials.Guild];
 const intents = [
   GatewayIntentBits.Guilds,
   GatewayIntentBits.GuildMembers,
-  // Drop GuildVoiceStates if you delete the on-demand voice command/event.
-  GatewayIntentBits.GuildVoiceStates,
 ];
 const presence = {
   status: "online",
   activities: [{
-    name: "with Slash Commands",
+    name: "with bourbon",
     type: ActivityType.Playing,
   }],
 };

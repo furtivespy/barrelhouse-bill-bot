@@ -86,8 +86,8 @@ describe("settings merge", () => {
 });
 
 describe("BunEnmap persistence", () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "stancy-settings-"));
-  const poisonDir = fs.mkdtempSync(path.join(os.tmpdir(), "stancy-poison-"));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "bill-settings-"));
+  const poisonDir = fs.mkdtempSync(path.join(os.tmpdir(), "bill-poison-"));
 
   afterAll(() => {
     fs.rmSync(dataDir, { recursive: true, force: true });
@@ -160,7 +160,7 @@ describe("BunEnmap persistence", () => {
   });
 
   test("does not cache JSON null so ensure can restore defaults", () => {
-    const nullDir = fs.mkdtempSync(path.join(os.tmpdir(), "stancy-null-"));
+    const nullDir = fs.mkdtempSync(path.join(os.tmpdir(), "bill-null-"));
     const db = new Database(path.join(nullDir, "settings.sqlite"), { create: true });
     db.exec(`
       CREATE TABLE enmap_store (
@@ -183,7 +183,7 @@ describe("BunEnmap persistence", () => {
   });
 
   test("does not Function-eval or cache legacy non-JSON values", () => {
-    const evalDir = fs.mkdtempSync(path.join(os.tmpdir(), "stancy-eval-"));
+    const evalDir = fs.mkdtempSync(path.join(os.tmpdir(), "bill-eval-"));
     const db = new Database(path.join(evalDir, "settings.sqlite"), { create: true });
     db.exec(`
       CREATE TABLE enmap_store (

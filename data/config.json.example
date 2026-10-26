@@ -1,0 +1,13 @@
+{
+  "token": "REPLACE_ME_DISCORD_BOT_TOKEN",
+  "clientId": "REPLACE_ME_DISCORD_APPLICATION_ID",
+  "bugsnagKey": "",
+  "environment": "production",
+  "devGuildId": "",
+  "botOwnerId": "",
+  "defaultSettings": {
+    "modRole": "Moderator",
+    "adminRole": "Administrator",
+    "systemNotice": "true"
+  }
+}
