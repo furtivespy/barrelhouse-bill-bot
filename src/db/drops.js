@@ -7,6 +7,7 @@ const SCHEMA_VERSION = 1;
 const DROP_STATUSES = Object.freeze(["open", "closed", "canceled"]);
 const SIGNUP_STATUSES = Object.freeze(["allocated", "waitlist", "removed"]);
 const PICKUP_STATUSES = Object.freeze(["pending", "picked_up", "no_show"]);
+const BUSY_TIMEOUT_MS = 10_000;
 
 const DROPS_COLUMNS = `
     id TEXT PRIMARY KEY,
@@ -56,6 +57,12 @@ class DropNotFoundError extends DropError {}
 class SignupNotFoundError extends DropError {}
 class DuplicateSignupError extends DropError {}
 class DropValidationError extends DropError {}
+class DropNotOpenError extends DropValidationError {
+  constructor(status, options) {
+    super(`cannot sign up for a ${status} drop`, options);
+    this.dropStatus = status;
+  }
+}
 
 function isPlainObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -281,6 +288,46 @@ function mapSignup(row) {
   };
 }
 
+function runImmediate(db, work) {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = work();
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // BEGIN may have failed, or SQLite already rolled back.
+    }
+    throw error;
+  }
+}
+
+function signupPosition(signups, userId) {
+  const signup = signups.find((row) => row.userId === userId);
+  if (!signup || signup.status === "removed") {
+    return null;
+  }
+  const peers = signups.filter((row) => row.status === signup.status);
+  const index = peers.findIndex((row) => row.userId === userId);
+  return index === -1 ? null : index + 1;
+}
+
+function signupCountsFromRows(signups, bottleLimit) {
+  let allocated = 0;
+  let waitlisted = 0;
+  for (const signup of signups) {
+    if (signup.status === "allocated") allocated += 1;
+    if (signup.status === "waitlist") waitlisted += 1;
+  }
+  return {
+    allocated,
+    waitlisted,
+    bottleLimit: bottleLimit ?? null,
+  };
+}
+
 class DropStore {
   constructor(options = {}) {
     this.name = options.name || "drops";
@@ -297,6 +344,7 @@ class DropStore {
 
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA foreign_keys = ON");
+    this.db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
     migrateSchema(this.db);
   }
 
@@ -439,6 +487,51 @@ class DropStore {
     return rows.map(mapDrop);
   }
 
+  insertSignupRecord(signup) {
+    try {
+      this.db
+        .query(
+          `INSERT INTO signups (
+            drop_id, user_id, joined_at, status, pickup_status, removed_by, removed_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          signup.dropId,
+          signup.userId,
+          signup.joinedAt,
+          signup.status,
+          signup.pickupStatus,
+          signup.removedBy,
+          signup.removedAt
+        );
+    } catch (error) {
+      const kind = sqliteConstraintKind(error);
+      if (kind === "unique") {
+        throw new DuplicateSignupError(
+          `user ${signup.userId} is already signed up for drop ${signup.dropId}`,
+          { cause: error }
+        );
+      }
+      if (kind === "foreign") {
+        throw new DropNotFoundError(`drop not found: ${signup.dropId}`, { cause: error });
+      }
+      throw error;
+    }
+
+    return this.getSignup(signup.dropId, signup.userId);
+  }
+
+  joinOutcome(drop, signup, created) {
+    const signups = this.listSignups(drop.id);
+    return {
+      drop,
+      signup,
+      created,
+      position: signupPosition(signups, signup.userId),
+      counts: signupCountsFromRows(signups, drop.bottleLimit),
+    };
+  }
+
   createSignup(input = {}) {
     if (!isPlainObject(input)) {
       throw new DropValidationError("signup fields must be an object");
@@ -457,41 +550,65 @@ class DropStore {
     return this.db.transaction(() => {
       const drop = this.getDrop(signup.dropId);
       if (drop && drop.status !== "open") {
-        throw new DropValidationError(`cannot sign up for a ${drop.status} drop`);
+        throw new DropNotOpenError(drop.status);
       }
 
-      try {
+      return this.insertSignupRecord(signup);
+    })();
+  }
+
+  joinSignup(dropId, userId, options = {}) {
+    const resolvedDropId = requiredText(dropId, "dropId");
+    const resolvedUserId = requiredText(userId, "userId");
+    if (!isPlainObject(options)) {
+      throw new DropValidationError("join options must be an object");
+    }
+    const joinedAt =
+      options.joinedAt !== undefined ? optionalTimestamp(options.joinedAt, "joinedAt") : null;
+
+    return runImmediate(this.db, () => {
+      const drop = this.getDrop(resolvedDropId);
+      if (!drop) {
+        throw new DropNotFoundError(`drop not found: ${resolvedDropId}`);
+      }
+      if (drop.status !== "open") {
+        throw new DropNotOpenError(drop.status);
+      }
+
+      const existing = this.getSignup(drop.id, resolvedUserId);
+      if (existing) {
+        return this.joinOutcome(drop, existing, false);
+      }
+
+      const allocated = Number(
         this.db
-          .query(
-            `INSERT INTO signups (
-              drop_id, user_id, joined_at, status, pickup_status, removed_by, removed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-          )
-          .run(
-            signup.dropId,
-            signup.userId,
-            signup.joinedAt,
-            signup.status,
-            signup.pickupStatus,
-            signup.removedBy,
-            signup.removedAt
-          );
+          .query(`SELECT COUNT(*) AS n FROM signups WHERE drop_id = ? AND status = 'allocated'`)
+          .get(drop.id).n
+      );
+      const status =
+        drop.bottleLimit == null || allocated < drop.bottleLimit ? "allocated" : "waitlist";
+
+      try {
+        const signup = this.insertSignupRecord({
+          dropId: drop.id,
+          userId: resolvedUserId,
+          joinedAt: joinedAt || new Date().toISOString(),
+          status,
+          pickupStatus: "pending",
+          removedBy: null,
+          removedAt: null,
+        });
+        return this.joinOutcome(drop, signup, true);
       } catch (error) {
-        const kind = sqliteConstraintKind(error);
-        if (kind === "unique") {
-          throw new DuplicateSignupError(
-            `user ${signup.userId} is already signed up for drop ${signup.dropId}`,
-            { cause: error }
-          );
-        }
-        if (kind === "foreign") {
-          throw new DropNotFoundError(`drop not found: ${signup.dropId}`, { cause: error });
+        if (error instanceof DuplicateSignupError) {
+          const raced = this.getSignup(drop.id, resolvedUserId);
+          if (raced) {
+            return this.joinOutcome(drop, raced, false);
+          }
         }
         throw error;
       }
-
-      return this.getSignup(signup.dropId, signup.userId);
-    })();
+    });
   }
 
   getSignup(dropId, userId) {
@@ -569,15 +686,19 @@ export {
   DROP_STATUSES,
   SIGNUP_STATUSES,
   PICKUP_STATUSES,
+  BUSY_TIMEOUT_MS,
   DropError,
   DropNotFoundError,
   SignupNotFoundError,
   DuplicateSignupError,
   DropValidationError,
+  DropNotOpenError,
   requiredText,
   optionalText,
   optionalBottleLimit,
   optionalTimestamp,
+  signupPosition,
+  signupCountsFromRows,
 };
 
 export default DropStore;

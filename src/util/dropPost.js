@@ -130,6 +130,23 @@ function formatSignupCounts({ allocated = 0, waitlisted = 0, bottleLimit = null 
   return `${inPart}, ${waitlisted} waitlisted`;
 }
 
+function formatJoinReply({ signup, position } = {}) {
+  if (signup?.status === "allocated") {
+    return `You're in (#${position})`;
+  }
+  if (signup?.status === "waitlist") {
+    return `Waitlisted (#${position})`;
+  }
+  return "You're not currently signed up for this drop.";
+}
+
+function formatDropClosedReply(status) {
+  if (status === "canceled") {
+    return "This drop was canceled.";
+  }
+  return "This drop is closed.";
+}
+
 function discordTimestamp(iso) {
   const seconds = Math.floor(new Date(iso).getTime() / 1000);
   return `<t:${seconds}:f> (<t:${seconds}:R>)`;
@@ -221,6 +238,8 @@ export {
   countSignups,
   signupCountsForDrop,
   formatSignupCounts,
+  formatJoinReply,
+  formatDropClosedReply,
   discordTimestamp,
   inButtonCustomId,
   parseInButtonCustomId,
