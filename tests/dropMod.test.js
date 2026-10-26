@@ -566,16 +566,19 @@ describe("/drop list, remove, pickup, export", () => {
     const drop = store.createDrop(sampleDrop({ bottleLimit: 2, messageId: "msg-drop" }));
     const command = new Drop(dropClient(store));
     const editReplies = [];
-    await command.button({
+    const interaction = {
       customId: `drop:in:${drop.id}`,
       user: { id: "user-9" },
       memberPermissions: managePerms(false),
       deferred: false,
       replied: false,
-      deferReply: async () => {},
+      deferReply: async () => {
+        interaction.deferred = true;
+      },
       editReply: async (payload) => editReplies.push(payload),
       message: { edit: async () => {} },
-    });
+    };
+    await command.button(interaction);
 
     expect(editReplies[0].content).toBe("You're in (#1)");
     expect(store.getSignup(drop.id, "user-9").status).toBe("allocated");
