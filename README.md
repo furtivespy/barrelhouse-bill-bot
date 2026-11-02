@@ -9,7 +9,7 @@ Right now the bot answers `/ping`, `/status`, `/settings`, and `/drop create`. P
 
 * Copy `config.json.sample` to `config.json` and fill in `token` and `clientId`
 * Copy `.env.example` to `.env` and set `BOT_CONFIG` to the path of that config file
-* Install [Bun](https://bun.sh) 1.4.3 (see `packageManager` in `package.json`)
+* Install [Bun](https://bun.sh) 1.4.4 (see `packageManager` in `package.json`)
 * Install package dependencies: `bun install`
 * Run the bot: `bun run start`
 * Run tests: `bun test`
@@ -134,8 +134,6 @@ Every package in `package.json` is imported. None were removed.
 
 Held back (update would be brand-new or would force a risky rewrite):
 
-* **Bun 1.4.3** (not 1.4.4) — same pin in `packageManager`, the `oven/bun` image, and `setup-bun`.
-* **dotenv ^18.0.8** (not 18.0.9) — 18.0.9 was published less than 48 hours before the starter-bot review; the cooldown should keep it out of the lockfile.
 * **chalk 4.1.2** — still CommonJS; chalk 5 is ESM-native. This project is ES modules (`"type": "module"`), so chalk 4 still `import`s.
 * **K-Phoen/semver-release-action@master** — already a floating `master` pin on the release workflow.
 
