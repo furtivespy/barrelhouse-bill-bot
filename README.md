@@ -135,6 +135,5 @@ Every package in `package.json` is imported. None were removed.
 Held back (update would be brand-new or would force a risky rewrite):
 
 * **chalk 4.1.2** — still CommonJS; chalk 5 is ESM-native. This project is ES modules (`"type": "module"`), so chalk 4 still `import`s.
-* **K-Phoen/semver-release-action@master** — already a floating `master` pin on the release workflow.
 
 `moment` is in maintenance mode but is used by the logger for timestamps; it is kept rather than rewritten to `Date`. `dotenv` is still called from `src/bot.js` (`config({ quiet: true })`) even though Bun also auto-loads `.env`. `@discordjs/rest`, `@opentelemetry/api`, `@opentelemetry/resources`, and `@opentelemetry/sdk-trace` are direct dependencies because the bot `import`s them. Tracing loads OpenTelemetry with a dynamic `import()` inside `startTracing()`.
