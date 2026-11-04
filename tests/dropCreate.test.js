@@ -425,7 +425,7 @@ describe("/drop create", () => {
     });
 
     expect(replies[0]).toEqual({
-      content: "Use /drop create in a server channel.",
+      content: "Use /drop in a server channel.",
       flags: MessageFlags.Ephemeral,
     });
     expect(replies[1].content).toBe("bottle is required");

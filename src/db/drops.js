@@ -466,7 +466,7 @@ class DropStore {
     return this.getDrop(existing.id);
   }
 
-  listDrops({ guildId, status } = {}) {
+  listDrops({ guildId, channelId, status } = {}) {
     const clauses = [];
     const params = [];
     if (guildId != null && guildId !== "") {
@@ -479,6 +479,16 @@ class DropStore {
         params.push(resolved);
       }
     }
+    if (channelId != null && channelId !== "") {
+      if (typeof channelId !== "string") {
+        throw new DropValidationError("channelId must be a string");
+      }
+      const resolved = channelId.trim();
+      if (resolved) {
+        clauses.push("channel_id = ?");
+        params.push(resolved);
+      }
+    }
     if (status != null && status !== "") {
       oneOf(status, DROP_STATUSES, "status");
       clauses.push("status = ?");
@@ -486,8 +496,108 @@ class DropStore {
     }
 
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-    const rows = this.db.query(`SELECT * FROM drops ${where}`).all(...params);
+    const rows = this.db
+      .query(`SELECT * FROM drops ${where} ORDER BY rowid DESC`)
+      .all(...params);
     return rows.map(mapDrop);
+  }
+
+  allocatedCount(dropId) {
+    return Number(
+      this.db
+        .query(`SELECT COUNT(*) AS n FROM signups WHERE drop_id = ? AND status = 'allocated'`)
+        .get(dropId).n
+    );
+  }
+
+  hasAllocationRoom(drop) {
+    return drop.bottleLimit == null || this.allocatedCount(drop.id) < drop.bottleLimit;
+  }
+
+  // Assumes the caller already holds a write transaction (BEGIN IMMEDIATE).
+  promoteNextWaitlisted(drop) {
+    if (!this.hasAllocationRoom(drop)) {
+      return null;
+    }
+    const next = this.listSignups(drop.id, { status: "waitlist" })[0];
+    if (!next) {
+      return null;
+    }
+    return this.updateSignup(drop.id, next.userId, { status: "allocated" });
+  }
+
+  removeSignup(dropId, userId, options = {}) {
+    const resolvedDropId = requiredText(dropId, "dropId");
+    const resolvedUserId = requiredText(userId, "userId");
+    if (!isPlainObject(options)) {
+      throw new DropValidationError("remove options must be an object");
+    }
+    const removedBy = requiredText(options.removedBy, "removedBy");
+    const removedAt =
+      options.removedAt !== undefined
+        ? optionalTimestamp(options.removedAt, "removedAt")
+        : null;
+
+    return runImmediate(this.db, () => {
+      const drop = this.getDrop(resolvedDropId);
+      if (!drop) {
+        throw new DropNotFoundError(`drop not found: ${resolvedDropId}`);
+      }
+
+      const existing = this.getSignup(drop.id, resolvedUserId);
+      if (!existing) {
+        throw new SignupNotFoundError(`signup not found: ${drop.id}/${resolvedUserId}`);
+      }
+      if (existing.status === "removed") {
+        return {
+          drop,
+          signup: existing,
+          alreadyRemoved: true,
+          promoted: null,
+          counts: signupCountsFromRows(this.listSignups(drop.id), drop.bottleLimit),
+        };
+      }
+
+      const hadBottle = existing.status === "allocated";
+      const signup = this.updateSignup(drop.id, resolvedUserId, {
+        status: "removed",
+        removedBy,
+        removedAt: removedAt || new Date().toISOString(),
+      });
+      const promoted = hadBottle ? this.promoteNextWaitlisted(drop) : null;
+
+      return {
+        drop,
+        signup,
+        alreadyRemoved: false,
+        promoted,
+        counts: signupCountsFromRows(this.listSignups(drop.id), drop.bottleLimit),
+      };
+    });
+  }
+
+  setPickupStatus(dropId, userId, pickupStatus) {
+    const resolvedDropId = requiredText(dropId, "dropId");
+    const resolvedUserId = requiredText(userId, "userId");
+    const resolvedPickup = oneOf(pickupStatus, PICKUP_STATUSES, "pickupStatus");
+
+    return runImmediate(this.db, () => {
+      const drop = this.getDrop(resolvedDropId);
+      if (!drop) {
+        throw new DropNotFoundError(`drop not found: ${resolvedDropId}`);
+      }
+
+      const existing = this.getSignup(drop.id, resolvedUserId);
+      if (!existing) {
+        throw new SignupNotFoundError(`signup not found: ${drop.id}/${resolvedUserId}`);
+      }
+      if (existing.status !== "allocated") {
+        throw new DropValidationError("only allocated sign-ups can be marked for pickup");
+      }
+
+      const signup = this.updateSignup(drop.id, resolvedUserId, { pickupStatus: resolvedPickup });
+      return { drop, signup };
+    });
   }
 
   insertSignupRecord(signup) {
@@ -522,6 +632,16 @@ class DropStore {
     }
 
     return this.getSignup(signup.dropId, signup.userId);
+  }
+
+  // Assumes the caller already holds a write transaction (BEGIN IMMEDIATE).
+  rejoinRemovedSignup(drop, userId, joinedAt) {
+    const status = this.hasAllocationRoom(drop) ? "allocated" : "waitlist";
+    return this.updateSignup(drop.id, userId, {
+      status,
+      pickupStatus: "pending",
+      joinedAt,
+    });
   }
 
   joinOutcome(drop, signup, created) {
@@ -579,23 +699,22 @@ class DropStore {
       }
 
       const existing = this.getSignup(drop.id, resolvedUserId);
-      if (existing) {
+      if (existing && existing.status !== "removed") {
         return this.joinOutcome(drop, existing, false);
       }
 
-      const allocated = Number(
-        this.db
-          .query(`SELECT COUNT(*) AS n FROM signups WHERE drop_id = ? AND status = 'allocated'`)
-          .get(drop.id).n
-      );
-      const status =
-        drop.bottleLimit == null || allocated < drop.bottleLimit ? "allocated" : "waitlist";
+      const at = joinedAt || new Date().toISOString();
+      if (existing?.status === "removed") {
+        return this.joinOutcome(drop, this.rejoinRemovedSignup(drop, resolvedUserId, at), true);
+      }
+
+      const status = this.hasAllocationRoom(drop) ? "allocated" : "waitlist";
 
       try {
         const signup = this.insertSignupRecord({
           dropId: drop.id,
           userId: resolvedUserId,
-          joinedAt: joinedAt || new Date().toISOString(),
+          joinedAt: at,
           status,
           pickupStatus: "pending",
           removedBy: null,
@@ -605,6 +724,9 @@ class DropStore {
       } catch (error) {
         if (error instanceof DuplicateSignupError) {
           const raced = this.getSignup(drop.id, resolvedUserId);
+          if (raced?.status === "removed") {
+            return this.joinOutcome(drop, this.rejoinRemovedSignup(drop, resolvedUserId, at), true);
+          }
           if (raced) {
             return this.joinOutcome(drop, raced, false);
           }
@@ -635,6 +757,10 @@ class DropStore {
 
     const next = normalizeSignupRemoval({
       ...existing,
+      joinedAt:
+        patch.joinedAt !== undefined
+          ? optionalTimestamp(patch.joinedAt, "joinedAt") || existing.joinedAt
+          : existing.joinedAt,
       status: patch.status !== undefined ? oneOf(patch.status, SIGNUP_STATUSES, "status") : existing.status,
       pickupStatus:
         patch.pickupStatus !== undefined
@@ -648,10 +774,18 @@ class DropStore {
     this.db
       .query(
         `UPDATE signups SET
-          status = ?, pickup_status = ?, removed_by = ?, removed_at = ?
+          joined_at = ?, status = ?, pickup_status = ?, removed_by = ?, removed_at = ?
         WHERE drop_id = ? AND user_id = ?`
       )
-      .run(next.status, next.pickupStatus, next.removedBy, next.removedAt, existing.dropId, existing.userId);
+      .run(
+        next.joinedAt,
+        next.status,
+        next.pickupStatus,
+        next.removedBy,
+        next.removedAt,
+        existing.dropId,
+        existing.userId
+      );
 
     return this.getSignup(existing.dropId, existing.userId);
   }

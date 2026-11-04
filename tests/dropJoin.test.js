@@ -290,6 +290,81 @@ describe("joinSignup allocation", () => {
     store.close();
   });
 
+  test("rejoins a removed user as a fresh join at the back", () => {
+    const store = memoryDrops();
+    const drop = store.createDrop(sampleDrop({ bottleLimit: 1 }));
+    store.joinSignup(drop.id, "user-1", { joinedAt: "2026-10-24T12:00:00.000Z" });
+    store.joinSignup(drop.id, "user-2", { joinedAt: "2026-10-24T12:00:01.000Z" });
+    store.joinSignup(drop.id, "user-3", { joinedAt: "2026-10-24T12:00:02.000Z" });
+    store.updateSignup(drop.id, "user-1", { pickupStatus: "picked_up" });
+    store.removeSignup(drop.id, "user-1", {
+      removedBy: "mod-1",
+      removedAt: "2026-10-24T12:05:00.000Z",
+    });
+
+    expect(store.getSignup(drop.id, "user-2").status).toBe("allocated");
+    expect(store.getSignup(drop.id, "user-3").status).toBe("waitlist");
+    expect(store.getSignup(drop.id, "user-1")).toMatchObject({
+      status: "removed",
+      pickupStatus: "picked_up",
+      removedBy: "mod-1",
+    });
+
+    const rejoined = store.joinSignup(drop.id, "user-1", {
+      joinedAt: "2026-10-24T12:06:00.000Z",
+    });
+
+    expect(rejoined).toMatchObject({
+      created: true,
+      position: 2,
+      signup: {
+        userId: "user-1",
+        status: "waitlist",
+        pickupStatus: "pending",
+        removedBy: null,
+        removedAt: null,
+        joinedAt: "2026-10-24T12:06:00.000Z",
+      },
+      counts: { allocated: 1, waitlisted: 2, bottleLimit: 1 },
+    });
+    expect(store.listSignups(drop.id)).toHaveLength(3);
+    expect(store.listSignups(drop.id, { status: "waitlist" }).map((row) => row.userId)).toEqual([
+      "user-3",
+      "user-1",
+    ]);
+    store.close();
+  });
+
+  test("removed user is allocated again when a bottle is free", () => {
+    const store = memoryDrops();
+    const drop = store.createDrop(sampleDrop({ bottleLimit: 2 }));
+    store.joinSignup(drop.id, "user-1", { joinedAt: "2026-10-24T12:00:00.000Z" });
+    store.joinSignup(drop.id, "user-2", { joinedAt: "2026-10-24T12:00:01.000Z" });
+    store.removeSignup(drop.id, "user-1", { removedBy: "mod-1" });
+
+    const rejoined = store.joinSignup(drop.id, "user-1", {
+      joinedAt: "2026-10-24T12:06:00.000Z",
+    });
+
+    expect(rejoined).toMatchObject({
+      created: true,
+      position: 2,
+      signup: {
+        userId: "user-1",
+        status: "allocated",
+        pickupStatus: "pending",
+        removedBy: null,
+        removedAt: null,
+        joinedAt: "2026-10-24T12:06:00.000Z",
+      },
+    });
+    expect(store.listSignups(drop.id, { status: "allocated" }).map((row) => row.userId)).toEqual([
+      "user-2",
+      "user-1",
+    ]);
+    store.close();
+  });
+
   test("does not promote a waitlisted duplicate if a later press happens after the limit is full", () => {
     const store = memoryDrops();
     const drop = store.createDrop(sampleDrop({ bottleLimit: 1 }));

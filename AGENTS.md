@@ -30,7 +30,7 @@ Bun + discord.js v14, ES modules (`"type": "module"`). Entry point is `src/bot.j
 | `.env.example` | Every process env var the code reads |
 | `docker-compose.yml` | Run the published (or locally built) image with `./data` mounted at `/data` |
 
-Slash commands in this repo: `/ping` (User), `/status` (User), `/settings` (Administrator), `/drop create` (User; Discord `ManageMessages` default member permission until FUR-125 adds mod-role gating). Buttons/selects/modals route to the command whose name is the `customId` prefix before `:`.
+Slash commands in this repo: `/ping` (User), `/status` (User), `/settings` (Administrator), `/drop create` (User; Discord `ManageMessages` default member permission until FUR-125 adds mod-role gating), `/drop list`, `/drop remove`, `/drop pickup`, `/drop export` (same `ManageMessages` hide; also denied at runtime for non-mods). Buttons/selects/modals route to the command whose name is the `customId` prefix before `:`.
 
 Permission ladder: User, Moderator, Administrator, Server Owner, Bot Owner. Role names come from guild settings (`modRole`, `adminRole`).
 
