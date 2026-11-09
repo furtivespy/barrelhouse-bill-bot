@@ -234,6 +234,9 @@ describe("drop helpers", () => {
     expect(store.listDrops({ guildId: "guild-1", status: "open" }).map((drop) => drop.id)).toEqual([
       openA.id,
     ]);
+    expect(
+      store.listDrops({ guildId: "guild-1", channelId: "channel-1", status: "open" }).map((drop) => drop.id)
+    ).toEqual([openA.id]);
     store.close();
   });
 });
@@ -458,6 +461,165 @@ describe("signup helpers", () => {
     );
     expect(() => store.updateSignup(drop.id, "user-1", { pickupStatus: "pickedUp" })).toThrow(
       DropValidationError
+    );
+    store.close();
+  });
+});
+
+describe("removeSignup and pickup", () => {
+  test("removes a waitlisted person without promoting anyone", () => {
+    const store = memoryDrops();
+    const drop = store.createDrop(sampleDrop({ bottleLimit: 1 }));
+    store.createSignup({
+      dropId: drop.id,
+      userId: "user-1",
+      status: "allocated",
+      joinedAt: "2026-10-24T12:00:00.000Z",
+    });
+    store.createSignup({
+      dropId: drop.id,
+      userId: "user-2",
+      status: "waitlist",
+      joinedAt: "2026-10-24T12:00:01.000Z",
+    });
+
+    const result = store.removeSignup(drop.id, "user-2", {
+      removedBy: "mod-9",
+      removedAt: "2026-10-24T13:00:00.000Z",
+    });
+
+    expect(result.alreadyRemoved).toBe(false);
+    expect(result.promoted).toBeNull();
+    expect(result.signup).toMatchObject({
+      userId: "user-2",
+      status: "removed",
+      removedBy: "mod-9",
+      removedAt: "2026-10-24T13:00:00.000Z",
+    });
+    expect(store.getSignup(drop.id, "user-1").status).toBe("allocated");
+    expect(store.listSignups(drop.id, { status: "waitlist" })).toEqual([]);
+    store.close();
+  });
+
+  test("promotes the next waitlisted person when an allocated bottle is freed", () => {
+    const store = memoryDrops();
+    const drop = store.createDrop(sampleDrop({ bottleLimit: 1 }));
+    store.createSignup({
+      dropId: drop.id,
+      userId: "user-1",
+      status: "allocated",
+      joinedAt: "2026-10-24T12:00:00.000Z",
+    });
+    store.createSignup({
+      dropId: drop.id,
+      userId: "user-2",
+      status: "waitlist",
+      joinedAt: "2026-10-24T12:00:02.000Z",
+    });
+    store.createSignup({
+      dropId: drop.id,
+      userId: "user-3",
+      status: "waitlist",
+      joinedAt: "2026-10-24T12:00:01.000Z",
+    });
+
+    const result = store.removeSignup(drop.id, "user-1", {
+      removedBy: "mod-2",
+      removedAt: "2026-10-24T13:05:00.000Z",
+    });
+
+    expect(result.promoted).toMatchObject({
+      userId: "user-3",
+      status: "allocated",
+      pickupStatus: "pending",
+      removedBy: null,
+      removedAt: null,
+    });
+    expect(result.signup).toMatchObject({
+      userId: "user-1",
+      status: "removed",
+      removedBy: "mod-2",
+      removedAt: "2026-10-24T13:05:00.000Z",
+    });
+    expect(store.listSignups(drop.id, { status: "allocated" }).map((row) => row.userId)).toEqual([
+      "user-3",
+    ]);
+    expect(store.listSignups(drop.id, { status: "waitlist" }).map((row) => row.userId)).toEqual([
+      "user-2",
+    ]);
+    expect(result.counts).toEqual({ allocated: 1, waitlisted: 1, bottleLimit: 1 });
+    store.close();
+  });
+
+  test("does not promote twice when the same person is removed again", () => {
+    const store = memoryDrops();
+    const drop = store.createDrop(sampleDrop({ bottleLimit: 1 }));
+    store.createSignup({
+      dropId: drop.id,
+      userId: "user-1",
+      status: "allocated",
+      joinedAt: "2026-10-24T12:00:00.000Z",
+    });
+    store.createSignup({
+      dropId: drop.id,
+      userId: "user-2",
+      status: "waitlist",
+      joinedAt: "2026-10-24T12:00:01.000Z",
+    });
+    store.createSignup({
+      dropId: drop.id,
+      userId: "user-3",
+      status: "waitlist",
+      joinedAt: "2026-10-24T12:00:02.000Z",
+    });
+
+    store.removeSignup(drop.id, "user-1", { removedBy: "mod-1" });
+    const again = store.removeSignup(drop.id, "user-1", { removedBy: "mod-9" });
+
+    expect(again.alreadyRemoved).toBe(true);
+    expect(again.promoted).toBeNull();
+    expect(again.signup.removedBy).toBe("mod-1");
+    expect(store.getSignup(drop.id, "user-2").status).toBe("allocated");
+    expect(store.getSignup(drop.id, "user-3").status).toBe("waitlist");
+    store.close();
+  });
+
+  test("marks allocated pickups and rejects waitlist pickup marks", () => {
+    const store = memoryDrops();
+    const drop = store.createDrop(sampleDrop({ bottleLimit: 1 }));
+    store.createSignup({
+      dropId: drop.id,
+      userId: "user-1",
+      status: "allocated",
+    });
+    store.createSignup({
+      dropId: drop.id,
+      userId: "user-2",
+      status: "waitlist",
+    });
+
+    expect(store.setPickupStatus(drop.id, "user-1", "picked_up").signup.pickupStatus).toBe(
+      "picked_up"
+    );
+    expect(store.setPickupStatus(drop.id, "user-1", "no_show").signup.pickupStatus).toBe("no_show");
+    expect(store.setPickupStatus(drop.id, "user-1", "pending").signup.pickupStatus).toBe("pending");
+    expect(() => store.setPickupStatus(drop.id, "user-2", "picked_up")).toThrow(DropValidationError);
+    expect(() => store.setPickupStatus(drop.id, "missing", "picked_up")).toThrow(SignupNotFoundError);
+    store.close();
+  });
+
+  test("requires remover info and maps a missing signup", () => {
+    const store = memoryDrops();
+    const drop = store.createDrop(sampleDrop());
+    store.createSignup({
+      dropId: drop.id,
+      userId: "user-1",
+      status: "allocated",
+    });
+
+    expect(() => store.removeSignup(drop.id, "user-1", {})).toThrow(DropValidationError);
+    expect(() => store.removeSignup(drop.id, "missing", { removedBy: "mod-1" })).toThrow(
+      SignupNotFoundError
     );
     store.close();
   });
