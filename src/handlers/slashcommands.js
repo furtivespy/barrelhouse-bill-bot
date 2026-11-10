@@ -2,6 +2,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Collection, REST, Routes } from "discord.js";
 import { listJsFiles, instantiate, importJsFile } from "./discover.js";
+import {
+  commandRegistrationPayload,
+  isQaUnlockAdminCommands,
+} from "../util/qaUnlock.js";
 
 const DEFAULT_COMMANDS_PATH = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -21,6 +25,16 @@ async function loadSlashCommands(botClient, options = {}) {
   botClient.logger?.info("Loading Slash Commands", "slashcommands.js");
   if (!botClient.slash_commands) {
     botClient.slash_commands = new Collection();
+  }
+
+  const env = options.env || process.env;
+  const unlockAdminCommands = isQaUnlockAdminCommands(env);
+  botClient.qaUnlockAdminCommands = unlockAdminCommands;
+  if (unlockAdminCommands) {
+    botClient.logger?.warn(
+      "QA_UNLOCK_ADMIN_COMMANDS is set — admin slash commands register without Administrator defaultMemberPermissions and skip the runtime Administrator check (QA/dev only, not for production)",
+      "slashcommands.js"
+    );
   }
 
   const slashCommandsPath = options.commandsPath || DEFAULT_COMMANDS_PATH;
@@ -52,9 +66,14 @@ async function registerSlashCommands(botClient, commands, options = {}) {
     throw new Error("Cannot register slash commands without config.token and config.clientId");
   }
 
-  const payload = commands.map((command) => command.data.toJSON());
+  const env = options.env || process.env;
+  const unlockAdminCommands =
+    options.unlockAdminCommands ?? isQaUnlockAdminCommands(env);
+  const payload = commands.map((command) =>
+    commandRegistrationPayload(command, unlockAdminCommands)
+  );
   const rest = options.rest || new REST({ version: "10" }).setToken(token);
-  const guildId = resolveDevGuildId(botClient.config, options.env || process.env);
+  const guildId = resolveDevGuildId(botClient.config, env);
 
   if (guildId) {
     await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: payload });
