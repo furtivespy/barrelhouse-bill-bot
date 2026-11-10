@@ -443,6 +443,94 @@ describe("interaction router", () => {
     expect(seen).toEqual(["Night Watch"]);
   });
 
+  test("QA unlock lets a non-admin run an Administrator command", async () => {
+    const executed = [];
+    const client = permissionClient({
+      settings: {
+        conf: { permLevel: "Administrator" },
+        async execute() {
+          executed.push("ran");
+        },
+      },
+    });
+    client.qaUnlockAdminCommands = true;
+
+    const result = await routeInteraction(
+      client,
+      baseInteraction({
+        isCommand: () => true,
+        commandName: "settings",
+        guild: guildWithRoles(),
+        member: memberWithRoles(),
+        user: { id: "user-1" },
+      })
+    );
+
+    expect(result.denied).toBeUndefined();
+    expect(result.handled).toBe(true);
+    expect(executed).toEqual(["ran"]);
+  });
+
+  test("unset QA unlock still denies a non-admin Administrator command", async () => {
+    const executed = [];
+    const replies = [];
+    const client = permissionClient({
+      settings: {
+        conf: { permLevel: "Administrator" },
+        async execute() {
+          executed.push("ran");
+        },
+      },
+    });
+    client.qaUnlockAdminCommands = false;
+
+    const result = await routeInteraction(
+      client,
+      baseInteraction({
+        isCommand: () => true,
+        commandName: "settings",
+        guild: guildWithRoles(),
+        member: memberWithRoles(),
+        user: { id: "user-1" },
+        reply: async (payload) => replies.push(payload),
+      })
+    );
+
+    expect(result.denied).toBe(true);
+    expect(executed).toEqual([]);
+    expect(replies[0].content).toContain("permission");
+  });
+
+  test("QA unlock does not skip Moderator checks", async () => {
+    const executed = [];
+    const replies = [];
+    const client = permissionClient({
+      lock: {
+        conf: { permLevel: "Moderator" },
+        async execute() {
+          executed.push("ran");
+        },
+      },
+    });
+    client.qaUnlockAdminCommands = true;
+
+    const result = await routeInteraction(
+      client,
+      baseInteraction({
+        isCommand: () => true,
+        commandName: "lock",
+        guild: guildWithRoles(),
+        member: memberWithRoles(),
+        user: { id: "user-1" },
+        reply: async (payload) => replies.push(payload),
+      })
+    );
+
+    expect(result.denied).toBe(true);
+    expect(executed).toEqual([]);
+    expect(replies[0].content).toContain("permission");
+  });
+
   test("allows a mod whose roles arrived as a snowflake array", async () => {
     const executed = [];
     const client = permissionClient({

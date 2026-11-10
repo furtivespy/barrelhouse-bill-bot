@@ -53,6 +53,8 @@ describe(".env.example", () => {
     const missing = referenced.filter((name) => !example.includes(name));
     expect(missing).toEqual([]);
     expect(example).not.toMatch(/STANCY_DATA_DIR/);
+    expect(example).toMatch(/QA_UNLOCK_ADMIN_COMMANDS/);
+    expect(example).toMatch(/QA\/dev only/i);
   });
 });
 

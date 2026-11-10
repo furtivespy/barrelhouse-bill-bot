@@ -5,6 +5,10 @@ import {
   shouldSendPermissionNotice,
 } from "../util/permissions.js";
 import { guildFromInteraction } from "../util/settings.js";
+import {
+  isQaUnlockAdminCommands,
+  shouldBypassAdministratorPermLevel,
+} from "../util/qaUnlock.js";
 
 const COMMAND_ERROR = "There was an error while executing this command!";
 const BUTTON_ERROR = "There was an error while processing this button!";
@@ -122,12 +126,20 @@ function evaluatePermission(client, interaction, command) {
   const settings = interaction.settings || attachSettings(client, interaction) || {};
   const context = permissionContext(interaction, settings);
   context.client = client;
-  return checkCommandPermission({
+  const permission = checkCommandPermission({
     permLevels: client.permLevels,
     levelCache: client.levelCache,
     context,
     command,
   });
+  const unlocked =
+    typeof client.qaUnlockAdminCommands === "boolean"
+      ? client.qaUnlockAdminCommands
+      : isQaUnlockAdminCommands();
+  if (!permission.allowed && shouldBypassAdministratorPermLevel(command, unlocked)) {
+    return { ...permission, allowed: true };
+  }
+  return permission;
 }
 
 async function denyPermission(interaction, kind, permission) {

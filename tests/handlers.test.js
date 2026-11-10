@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Collection, Events, MessageFlags, Routes } from "discord.js";
+import { Collection, Events, MessageFlags, PermissionsBitField, Routes } from "discord.js";
 import { listJsFiles } from "../src/handlers/discover.js";
 import EventTypes from "../src/base/EventTypes.js";
 import DropStore from "../src/db/drops.js";
@@ -288,6 +288,72 @@ describe("slash command registration", () => {
     expect(puts).toHaveLength(1);
     expect(puts[0].route).toEqual(Routes.applicationCommands("client-1"));
     expect(String(puts[0].route)).not.toMatch(/guilds/);
+  });
+
+  test("QA_UNLOCK_ADMIN_COMMANDS=1 registers /settings without Administrator default permissions", async () => {
+    const puts = [];
+    const rest = {
+      async put(route, payload) {
+        puts.push({ route, payload });
+      },
+    };
+    const warnings = [];
+    const client = fakeClient();
+    client.config = { token: "t", clientId: "client-1", environment: "development" };
+    client.logger = {
+      ...silentLogger(),
+      warn(content) {
+        warnings.push(content);
+      },
+    };
+
+    const unlockedCommands = await loadSlashCommands(client, {
+      env: { QA_UNLOCK_ADMIN_COMMANDS: "1" },
+    });
+    expect(client.qaUnlockAdminCommands).toBe(true);
+    expect(
+      warnings.some((line) => String(line).includes("QA_UNLOCK_ADMIN_COMMANDS"))
+    ).toBe(true);
+
+    await registerSlashCommands(client, unlockedCommands, {
+      rest,
+      env: { QA_UNLOCK_ADMIN_COMMANDS: "1", DEV_GUILD_ID: "999" },
+    });
+
+    const unlockedBody = puts[0].payload.body;
+    const unlockedSettings = unlockedBody.find((cmd) => cmd.name === "settings");
+    const unlockedDrop = unlockedBody.find((cmd) => cmd.name === "drop");
+    expect(unlockedSettings.default_member_permissions).toBeNull();
+    expect(unlockedDrop.default_member_permissions).toBe(
+      String(PermissionsBitField.Flags.ManageMessages)
+    );
+    expect(client.slash_commands.get("settings").data.toJSON().default_member_permissions).toBe(
+      String(PermissionsBitField.Flags.Administrator)
+    );
+  });
+
+  test("unset QA_UNLOCK_ADMIN_COMMANDS keeps Administrator on /settings", async () => {
+    const puts = [];
+    const rest = {
+      async put(_route, payload) {
+        puts.push(payload);
+      },
+    };
+    const client = fakeClient();
+    client.config = { token: "t", clientId: "client-1", environment: "production" };
+    const commands = await loadSlashCommands(client, { env: {} });
+    expect(client.qaUnlockAdminCommands).toBe(false);
+
+    await registerSlashCommands(client, commands, { rest, env: {} });
+
+    const settings = puts[0].body.find((cmd) => cmd.name === "settings");
+    const drop = puts[0].body.find((cmd) => cmd.name === "drop");
+    expect(settings.default_member_permissions).toBe(
+      String(PermissionsBitField.Flags.Administrator)
+    );
+    expect(drop.default_member_permissions).toBe(
+      String(PermissionsBitField.Flags.ManageMessages)
+    );
   });
 
   test("warns in development when registering globally because no guild id is set", async () => {

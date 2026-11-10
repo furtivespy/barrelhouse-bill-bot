@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { MessageFlags } from "discord.js";
+import { MessageFlags, PermissionsBitField } from "discord.js";
 import Drop from "../src/commands/slash/drop.js";
 import Ping from "../src/commands/slash/ping.js";
 import Settings from "../src/commands/slash/settings.js";
@@ -50,6 +50,9 @@ describe("slash command modules", () => {
 
     expect(settings.data.name).toBe("settings");
     expect(settings.conf.permLevel).toBe("Administrator");
+    expect(settings.data.toJSON().default_member_permissions).toBe(
+      String(PermissionsBitField.Flags.Administrator)
+    );
     expect(settings).toBeInstanceOf(Settings);
 
     expect(drop.data.name).toBe("drop");

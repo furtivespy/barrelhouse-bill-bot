@@ -55,6 +55,7 @@ Guild overrides live in `{dataDir}/settings.sqlite` (`./data` locally, `/data` i
 - `bunfig.toml` sets `install.minimumReleaseAge = 172800` (48 hours) so `bun install` / `bun update` skip npm versions published more recently than that.
 - Config is JSON (`BOT_CONFIG` / `config.json.sample` / `data/config.json.example`), not `config.js`. Token, `clientId`, and `bugsnagKey` are config keys, not env vars. Optional `timezone` (IANA, default `America/New_York`) is the zone for offset-less `/drop create` close times.
 - `DEV_GUILD_ID` (env) or `devGuildId` (config) registers guild-scoped slash commands. If neither is set, commands register globally (development logs a warning). Do not bake a guild id into source.
+- `QA_UNLOCK_ADMIN_COMMANDS=1` (env, QA/dev only) registers admin slash commands without Discord Administrator `defaultMemberPermissions` and skips the runtime Administrator permLevel check. Leave unset in production.
 - Logger is console-only unless `bugsnagKey` is a real key (not blank / `abc123`). Tracing is off unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
 - SIGTERM/SIGINT close SQLite stores, then flush traces when tracing is enabled. Tracing must not install its own signal handlers.
 - Package name, image name, and default `OTEL_SERVICE_NAME` are `barrelhouse-bill-bot` (`gitea.willsullivan.dev/furtivespy/barrelhouse-bill-bot`).

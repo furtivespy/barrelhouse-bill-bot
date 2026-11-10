@@ -28,6 +28,7 @@ Optional:
 * `timezone` — IANA zone used when `/drop create` is given a close time without `Z` or an offset. Defaults to `America/New_York` (Syracuse). Explicit `Z` / offsets are honored as written.
 * `BILL_DATA_DIR` (env) — local directory for SQLite files (defaults to `./data`). In a container this is always `/data`.
 * `DEV_GUILD_ID` (env) or `devGuildId` (config) — register slash commands to this guild instead of globally. Instant updates while developing. If neither is set, commands register globally (and development logs a warning). There is no hardcoded fallback guild.
+* `QA_UNLOCK_ADMIN_COMMANDS` (env) — **QA/dev only, not for production.** Set to `1` so admin-only slash commands (currently `/settings`) register without Discord's Administrator `defaultMemberPermissions` and so the runtime Administrator permLevel check is skipped. Unset, the commands stay hidden from non-admins. Use this on the local test bot so a non-admin QA account can see and invoke those commands.
 * `OTEL_EXPORTER_OTLP_ENDPOINT` (env) — optional OpenTelemetry. Tracing is off unless this endpoint is set.
 * `OTEL_SERVICE_NAME` (env) — defaults to `barrelhouse-bill-bot`.
 * `OTEL_EXPORTER_OTLP_HEADERS` (env) — comma-separated `key=value` headers for the exporter (for Honeycomb: `x-honeycomb-team=YOUR_API_KEY` and endpoint `https://api.honeycomb.io/v1/traces`).
