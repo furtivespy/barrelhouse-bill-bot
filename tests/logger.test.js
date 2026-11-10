@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import Bugsnag from "@bugsnag/js";
-import createLogger from "../src/util/logger.js";
+import chalk from "chalk";
+import createLogger, { writeConsole } from "../src/util/logger.js";
 
 function capturingWrite() {
   const lines = [];
@@ -171,5 +172,41 @@ describe("BugsnagLogger", () => {
     expect(write.lines).toEqual([
       { content: "visible", type: "debug", location: "tests" },
     ]);
+  });
+});
+
+describe("writeConsole", () => {
+  test("colors every log level", () => {
+    const previousLevel = chalk.level;
+    chalk.level = 1;
+    const lines = [];
+    const log = spyOn(console, "log").mockImplementation((line) => {
+      lines.push(line);
+    });
+
+    try {
+      const cases = [
+        ["log", "LOG", "\u001b[44m"],
+        ["warn", "WARN", "\u001b[43m"],
+        ["error", "ERROR", "\u001b[41m"],
+        ["debug", "DEBUG", "\u001b[32m"],
+        ["cmd", "CMD", "\u001b[47m"],
+        ["ready", "READY", "\u001b[42m"],
+        ["time", "TIME", "\u001b[46m"],
+      ];
+
+      for (const [type] of cases) {
+        writeConsole("payload", type, "tests");
+      }
+
+      expect(lines).toHaveLength(cases.length);
+      for (const [i, [, label, code]] of cases.entries()) {
+        expect(lines[i]).toContain(label);
+        expect(lines[i]).toContain(code);
+      }
+    } finally {
+      chalk.level = previousLevel;
+      log.mockRestore();
+    }
   });
 });
