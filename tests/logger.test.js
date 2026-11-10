@@ -177,22 +177,26 @@ describe("BugsnagLogger", () => {
 
 describe("writeConsole", () => {
   test("colors every log level", () => {
+    // chalk 6 (like 4) is level 0 on non-TTY CI/Docker. Enable color so this
+    // asserts the logger's styles, including black+background chains.
     const previousLevel = chalk.level;
-    chalk.level = 1;
     const lines = [];
-    const log = spyOn(console, "log").mockImplementation((line) => {
-      lines.push(line);
-    });
+    let log;
 
     try {
+      log = spyOn(console, "log").mockImplementation((line) => {
+        lines.push(line);
+      });
+      chalk.level = 1;
+
       const cases = [
-        ["log", "LOG", "\u001b[44m"],
-        ["warn", "WARN", "\u001b[43m"],
-        ["error", "ERROR", "\u001b[41m"],
-        ["debug", "DEBUG", "\u001b[32m"],
-        ["cmd", "CMD", "\u001b[47m"],
-        ["ready", "READY", "\u001b[42m"],
-        ["time", "TIME", "\u001b[46m"],
+        ["log", "\u001b[44mLOG\u001b[49m"],
+        ["warn", "\u001b[30m\u001b[43mWARN\u001b[49m\u001b[39m"],
+        ["error", "\u001b[41mERROR\u001b[49m"],
+        ["debug", "\u001b[32mDEBUG\u001b[39m"],
+        ["cmd", "\u001b[30m\u001b[47mCMD\u001b[49m\u001b[39m"],
+        ["ready", "\u001b[30m\u001b[42mREADY\u001b[49m\u001b[39m"],
+        ["time", "\u001b[30m\u001b[46mTIME\u001b[49m\u001b[39m"],
       ];
 
       for (const [type] of cases) {
@@ -200,13 +204,12 @@ describe("writeConsole", () => {
       }
 
       expect(lines).toHaveLength(cases.length);
-      for (const [i, [, label, code]] of cases.entries()) {
-        expect(lines[i]).toContain(label);
-        expect(lines[i]).toContain(code);
+      for (const [i, [, styled]] of cases.entries()) {
+        expect(lines[i]).toContain(styled);
       }
     } finally {
       chalk.level = previousLevel;
-      log.mockRestore();
+      log?.mockRestore();
     }
   });
 });
