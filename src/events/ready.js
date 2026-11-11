@@ -20,6 +20,13 @@ class Ready extends Event {
     } catch (error) {
       this.client.logger?.error(error, "ready.js");
     }
+    try {
+      if (typeof this.client.dropCloser?.reschedulePending === "function") {
+        await this.client.dropCloser.reschedulePending();
+      }
+    } catch (error) {
+      this.client.logger?.error(error, "ready.js drop closer");
+    }
     this.client.logger.ready("Ready!");
   }
 }

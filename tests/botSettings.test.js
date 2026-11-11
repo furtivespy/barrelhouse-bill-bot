@@ -36,6 +36,8 @@ describe("DiscordBot settings helpers", () => {
       createdBy: "mod-1",
     });
     expect(bot.drops.getDrop(drop.id).bottleName).toBe("Blanton's");
+    expect(typeof bot.dropCloser.reschedulePending).toBe("function");
+    bot.dropCloser.stop();
     bot.settings.close();
     bot.drops.close();
   });

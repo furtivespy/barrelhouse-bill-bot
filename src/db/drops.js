@@ -63,6 +63,12 @@ class DropNotOpenError extends DropValidationError {
     this.dropStatus = status;
   }
 }
+class DropAlreadySettledError extends DropValidationError {
+  constructor(status, options) {
+    super(`drop is already ${status}`, options);
+    this.dropStatus = status;
+  }
+}
 
 function isPlainObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -466,6 +472,50 @@ class DropStore {
     return this.getDrop(existing.id);
   }
 
+  setDropStatus(id, status) {
+    const resolved = oneOf(status, ["closed", "canceled"], "status");
+    const dropId = requiredText(id, "id");
+
+    return runImmediate(this.db, () => {
+      const drop = this.getDrop(dropId);
+      if (!drop) {
+        throw new DropNotFoundError(`drop not found: ${dropId}`);
+      }
+      if (drop.status === resolved) {
+        const signups = this.listSignups(drop.id);
+        return {
+          drop,
+          alreadySettled: true,
+          signups,
+          counts: signupCountsFromRows(signups, drop.bottleLimit),
+        };
+      }
+      if (drop.status !== "open") {
+        throw new DropAlreadySettledError(drop.status);
+      }
+
+      const updated = this.updateDrop(drop.id, { status: resolved });
+      const signups = this.listSignups(updated.id);
+      return {
+        drop: updated,
+        alreadySettled: false,
+        signups,
+        counts: signupCountsFromRows(signups, updated.bottleLimit),
+      };
+    });
+  }
+
+  listPendingCloses() {
+    const rows = this.db
+      .query(
+        `SELECT * FROM drops
+         WHERE status = 'open' AND close_time IS NOT NULL
+         ORDER BY close_time ASC, rowid ASC`
+      )
+      .all();
+    return rows.map(mapDrop);
+  }
+
   listDrops({ guildId, channelId, status } = {}) {
     const clauses = [];
     const params = [];
@@ -516,6 +566,9 @@ class DropStore {
 
   // Assumes the caller already holds a write transaction (BEGIN IMMEDIATE).
   promoteNextWaitlisted(drop) {
+    if (drop.status !== "open") {
+      return null;
+    }
     if (!this.hasAllocationRoom(drop)) {
       return null;
     }
@@ -830,6 +883,7 @@ export {
   DuplicateSignupError,
   DropValidationError,
   DropNotOpenError,
+  DropAlreadySettledError,
   requiredText,
   optionalText,
   optionalBottleLimit,

@@ -150,6 +150,19 @@ describe("event handler", () => {
     expect(client.appInfo).toBe(appInfo);
   });
 
+  test("clientReady reschedules pending drop closes after a restart", async () => {
+    const client = fakeClient();
+    const calls = [];
+    client.dropCloser = {
+      async reschedulePending() {
+        calls.push("reschedule");
+      },
+    };
+    await loadEvents(client);
+    await client.registered.clientReady.handler();
+    expect(calls).toEqual(["reschedule"]);
+  });
+
   test("interactionCreate routes a ping button through the loaded command", async () => {
     const client = fakeClient();
     await loadSlashCommands(client);

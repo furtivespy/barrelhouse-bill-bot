@@ -22,6 +22,8 @@ import {
 const DROP_COMMAND_NAME = "drop";
 const IN_BUTTON_PREFIX = "drop:in:";
 const DROP_EMBED_COLOR = 0xc4a35a;
+const ALLOCATED_FIELD_LIMIT = 1024;
+const ALLOCATED_TRUNCATION = "\n… Use /drop list for the full list.";
 
 const HAS_DATE_AND_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
 const HAS_EXPLICIT_OFFSET = /(?:Z|[+-]\d{2}:?\d{2})$/i;
@@ -138,6 +140,40 @@ function formatDropClosedReply(status) {
   return "This drop is closed.";
 }
 
+function formatDropStatus(status) {
+  if (status === "closed") return "Closed";
+  if (status === "canceled") return "Canceled";
+  return "Open";
+}
+
+function formatDropSettleReply(action, status) {
+  if (action === "close" && status === "closed") {
+    return "That drop is already closed.";
+  }
+  if (action === "cancel" && status === "canceled") {
+    return "That drop is already canceled.";
+  }
+  if (status === "canceled") {
+    return "That drop was canceled.";
+  }
+  if (status === "closed") {
+    return "That drop is already closed.";
+  }
+  return `That drop is ${status}.`;
+}
+
+function formatAllocatedList(signups = []) {
+  const allocated = signups.filter((row) => row?.status === "allocated");
+  if (!allocated.length) return "_None_";
+  const lines = allocated.map((row, index) => `${index + 1}. <@${row.userId}>`);
+  let text = lines.join("\n");
+  if (text.length > ALLOCATED_FIELD_LIMIT) {
+    const keep = ALLOCATED_FIELD_LIMIT - ALLOCATED_TRUNCATION.length;
+    text = `${text.slice(0, Math.max(0, keep)).trimEnd()}${ALLOCATED_TRUNCATION}`;
+  }
+  return text;
+}
+
 function discordTimestamp(iso) {
   const seconds = Math.floor(new Date(iso).getTime() / 1000);
   return `<t:${seconds}:f> (<t:${seconds}:R>)`;
@@ -155,18 +191,19 @@ function parseInButtonCustomId(customId) {
   return dropId || null;
 }
 
-function buildInButton(dropId) {
+function buildInButton(dropId, { disabled = false } = {}) {
   return new ButtonBuilder()
     .setCustomId(inButtonCustomId(dropId))
     .setLabel("In")
-    .setStyle(ButtonStyle.Success);
+    .setStyle(ButtonStyle.Success)
+    .setDisabled(Boolean(disabled));
 }
 
-function buildDropComponents(dropId) {
-  return [new ActionRowBuilder().addComponents(buildInButton(dropId))];
+function buildDropComponents(dropId, { disabled = false } = {}) {
+  return [new ActionRowBuilder().addComponents(buildInButton(dropId, { disabled }))];
 }
 
-function buildDropEmbed(drop, counts = {}) {
+function buildDropEmbed(drop, counts = {}, { signups } = {}) {
   const signupCounts = {
     allocated: counts.allocated ?? 0,
     waitlisted: counts.waitlisted ?? 0,
@@ -175,7 +212,7 @@ function buildDropEmbed(drop, counts = {}) {
   const embed = new EmbedBuilder()
     .setTitle(drop.bottleName)
     .setColor(DROP_EMBED_COLOR)
-    .setFooter({ text: drop.status === "open" || !drop.status ? "Open" : drop.status });
+    .setFooter({ text: formatDropStatus(drop.status) });
 
   if (drop.description) {
     embed.setDescription(drop.description);
@@ -207,18 +244,56 @@ function buildDropEmbed(drop, counts = {}) {
     value: formatSignupCounts(signupCounts),
     inline: false,
   });
+  if (drop.status === "closed") {
+    fields.push({
+      name: "Allocated",
+      value: formatAllocatedList(signups ?? []),
+      inline: false,
+    });
+  }
   embed.addFields(fields);
   return embed;
 }
 
-function buildDropMessage(drop, counts) {
+function isDropOpen(drop) {
+  return !drop?.status || drop.status === "open";
+}
+
+function buildDropMessage(drop, counts, { signups } = {}) {
   return {
-    embeds: [buildDropEmbed(drop, counts)],
-    components: buildDropComponents(drop.id),
+    embeds: [buildDropEmbed(drop, counts, { signups })],
+    components: buildDropComponents(drop.id, { disabled: !isDropOpen(drop) }),
   };
 }
 
+function buildStoredDropMessage(store, drop) {
+  const signups = typeof store?.listSignups === "function" ? store.listSignups(drop.id) : [];
+  return buildDropMessage(
+    drop,
+    {
+      ...countSignups(signups),
+      bottleLimit: drop.bottleLimit ?? null,
+    },
+    { signups }
+  );
+}
+
+async function editDropPost(client, drop, payload) {
+  if (!drop?.messageId || !drop?.channelId) return false;
+  const channels = client?.channels;
+  if (!channels) return false;
+
+  let channel = typeof channels.cache?.get === "function" ? channels.cache.get(drop.channelId) : null;
+  if (!channel && typeof channels.fetch === "function") {
+    channel = await channels.fetch(drop.channelId);
+  }
+  if (typeof channel?.messages?.edit !== "function") return false;
+  await channel.messages.edit(drop.messageId, payload);
+  return true;
+}
+
 export {
+  ALLOCATED_FIELD_LIMIT,
   DROP_COMMAND_NAME,
   DROP_EMBED_COLOR,
   IN_BUTTON_PREFIX,
@@ -231,6 +306,9 @@ export {
   formatSignupCounts,
   formatJoinReply,
   formatDropClosedReply,
+  formatDropStatus,
+  formatDropSettleReply,
+  formatAllocatedList,
   discordTimestamp,
   inButtonCustomId,
   parseInButtonCustomId,
@@ -238,4 +316,7 @@ export {
   buildDropComponents,
   buildDropEmbed,
   buildDropMessage,
+  buildStoredDropMessage,
+  editDropPost,
+  isDropOpen,
 };

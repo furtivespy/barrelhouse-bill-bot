@@ -6,7 +6,7 @@ import {
   PermissionsBitField,
 } from "discord.js";
 import { DropValidationError, PICKUP_STATUSES } from "../db/drops.js";
-import { DROP_EMBED_COLOR } from "./dropPost.js";
+import { DROP_EMBED_COLOR, formatDropStatus } from "./dropPost.js";
 
 const PICKUP_BUTTON_PREFIX = "drop:pickup:";
 const MAX_PICKUP_BUTTON_USERS = 5;
@@ -161,10 +161,8 @@ function buildModListPayload(drop, signups = []) {
     .setFooter({
       text:
         allocated.length > MAX_PICKUP_BUTTON_USERS
-          ? `${drop.status === "open" || !drop.status ? "Open" : drop.status} · Buttons mark the first ${MAX_PICKUP_BUTTON_USERS}. Use /drop pickup for others.`
-          : drop.status === "open" || !drop.status
-            ? "Open"
-            : drop.status,
+          ? `${formatDropStatus(drop.status)} · Buttons mark the first ${MAX_PICKUP_BUTTON_USERS}. Use /drop pickup for others.`
+          : formatDropStatus(drop.status),
     });
 
   return {
