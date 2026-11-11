@@ -10,6 +10,7 @@ import DropStore, {
   PICKUP_STATUSES,
   BUSY_TIMEOUT_MS,
   DuplicateSignupError,
+  DropAlreadySettledError,
   DropNotFoundError,
   DropNotOpenError,
   DropValidationError,
@@ -220,6 +221,68 @@ describe("drop helpers", () => {
     expect(closed.status).toBe("closed");
     expect(store.updateDrop(drop.id, { status: "canceled" }).status).toBe("canceled");
     expect(() => store.updateDrop("missing", { status: "closed" })).toThrow(DropNotFoundError);
+    store.close();
+  });
+
+  test("setDropStatus closes or cancels an open drop and is idempotent", () => {
+    const store = memoryDrops();
+    const drop = store.createDrop(sampleDrop({ id: "drop-open" }));
+    store.createSignup({ dropId: drop.id, userId: "user-1", status: "allocated" });
+
+    const closed = store.setDropStatus(drop.id, "closed");
+    expect(closed.alreadySettled).toBe(false);
+    expect(closed.drop.status).toBe("closed");
+    expect(closed.counts).toEqual({ allocated: 1, waitlisted: 0, bottleLimit: null });
+    expect(closed.signups.map((row) => row.userId)).toEqual(["user-1"]);
+
+    const again = store.setDropStatus(drop.id, "closed");
+    expect(again.alreadySettled).toBe(true);
+    expect(again.drop.status).toBe("closed");
+    expect(() => store.setDropStatus(drop.id, "canceled")).toThrow(DropAlreadySettledError);
+
+    const other = store.createDrop(sampleDrop({ id: "drop-cancel", bottleName: "Canceled later" }));
+    expect(store.setDropStatus(other.id, "canceled").drop.status).toBe("canceled");
+    expect(store.setDropStatus(other.id, "canceled").alreadySettled).toBe(true);
+    expect(() => store.setDropStatus(other.id, "closed")).toThrow(DropAlreadySettledError);
+    expect(() => store.setDropStatus("missing", "closed")).toThrow(DropNotFoundError);
+    store.close();
+  });
+
+  test("listPendingCloses returns open drops with a close time in order", () => {
+    const store = memoryDrops();
+    store.createDrop(sampleDrop({ id: "open-none", bottleName: "No close" }));
+    store.createDrop(
+      sampleDrop({
+        id: "later",
+        bottleName: "Later",
+        closeTime: "2026-10-24T20:00:00.000Z",
+      })
+    );
+    store.createDrop(
+      sampleDrop({
+        id: "sooner",
+        bottleName: "Sooner",
+        closeTime: "2026-10-24T18:00:00.000Z",
+      })
+    );
+    store.createDrop(
+      sampleDrop({
+        id: "already-closed",
+        bottleName: "Closed",
+        closeTime: "2026-10-24T17:00:00.000Z",
+        status: "closed",
+      })
+    );
+    store.createDrop(
+      sampleDrop({
+        id: "canceled",
+        bottleName: "Canceled",
+        closeTime: "2026-10-24T16:00:00.000Z",
+        status: "canceled",
+      })
+    );
+
+    expect(store.listPendingCloses().map((drop) => drop.id)).toEqual(["sooner", "later"]);
     store.close();
   });
 
@@ -548,6 +611,48 @@ describe("removeSignup and pickup", () => {
       "user-2",
     ]);
     expect(result.counts).toEqual({ allocated: 1, waitlisted: 1, bottleLimit: 1 });
+    store.close();
+  });
+
+  test("does not promote waitlisted people after a drop is closed or canceled", () => {
+    const store = memoryDrops();
+    const closed = store.createDrop(sampleDrop({ id: "closed-drop", bottleLimit: 1 }));
+    store.createSignup({
+      dropId: closed.id,
+      userId: "user-1",
+      status: "allocated",
+      joinedAt: "2026-10-24T12:00:00.000Z",
+    });
+    store.createSignup({
+      dropId: closed.id,
+      userId: "user-2",
+      status: "waitlist",
+      joinedAt: "2026-10-24T12:00:01.000Z",
+    });
+    store.setDropStatus(closed.id, "closed");
+
+    const closedResult = store.removeSignup(closed.id, "user-1", { removedBy: "mod-1" });
+    expect(closedResult.promoted).toBeNull();
+    expect(store.getSignup(closed.id, "user-2").status).toBe("waitlist");
+
+    const canceled = store.createDrop(
+      sampleDrop({ id: "canceled-drop", bottleName: "Canceled", bottleLimit: 1 })
+    );
+    store.createSignup({
+      dropId: canceled.id,
+      userId: "user-3",
+      status: "allocated",
+      joinedAt: "2026-10-24T12:00:00.000Z",
+    });
+    store.createSignup({
+      dropId: canceled.id,
+      userId: "user-4",
+      status: "waitlist",
+      joinedAt: "2026-10-24T12:00:01.000Z",
+    });
+    store.setDropStatus(canceled.id, "canceled");
+    expect(store.removeSignup(canceled.id, "user-3", { removedBy: "mod-1" }).promoted).toBeNull();
+    expect(store.getSignup(canceled.id, "user-4").status).toBe("waitlist");
     store.close();
   });
 

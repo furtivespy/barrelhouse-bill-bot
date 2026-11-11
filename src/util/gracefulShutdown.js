@@ -16,6 +16,12 @@ function collectStores(client) {
   return stores;
 }
 
+function stopDropCloser(client) {
+  if (typeof client?.dropCloser?.stop === "function") {
+    client.dropCloser.stop();
+  }
+}
+
 function closeStores(client) {
   const closed = [];
   for (const store of collectStores(client)) {
@@ -46,6 +52,7 @@ async function gracefulShutdown(
   } else {
     console.warn(line);
   }
+  stopDropCloser(client);
   closeStores(client);
   try {
     if (typeof flushTracing === "function") {
@@ -74,6 +81,7 @@ export {
   STORE_KEYS,
   collectStores,
   closeStores,
+  stopDropCloser,
   gracefulShutdown,
   registerShutdownHandlers,
 };

@@ -10,10 +10,15 @@ describe("gracefulShutdown", () => {
   test("closes the settings and drops stores this bot opens", () => {
     expect(STORE_KEYS).toEqual(["settings", "drops"]);
   });
-  test("closes stores, then flushes traces, then exits 0", async () => {
+  test("stops the drop closer before closing stores, then flushes traces, then exits 0", async () => {
     const order = [];
     const client = {
       logger: { warn() {} },
+      dropCloser: {
+        stop() {
+          order.push("closer");
+        },
+      },
       settings: {
         close() {
           order.push("close");
@@ -28,7 +33,7 @@ describe("gracefulShutdown", () => {
       },
     });
 
-    expect(order).toEqual(["close", "flush", "exit:0"]);
+    expect(order).toEqual(["closer", "close", "flush", "exit:0"]);
   });
 
   test("still exits 0 when tracing flush throws", async () => {

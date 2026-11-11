@@ -7,6 +7,7 @@ import {
 } from "discord.js";
 import SlashCommand from "../../base/SlashCommand.js";
 import {
+  DropAlreadySettledError,
   DropNotFoundError,
   DropNotOpenError,
   DropValidationError,
@@ -29,12 +30,16 @@ import {
   DROP_COMMAND_NAME,
   DropCreateValidationError,
   buildDropMessage,
+  buildStoredDropMessage,
+  editDropPost,
   formatDropClosedReply,
+  formatDropPostUpdateReply,
+  formatDropSettleReply,
   formatJoinReply,
+  isDropOpen,
   parseDropCreateInput,
   parseInButtonCustomId,
   readCreateOptions,
-  signupCountsForDrop,
 } from "../../util/dropPost.js";
 import { resolveTimeZone } from "../../util/timeZone.js";
 
@@ -76,9 +81,12 @@ async function deferPrivately(interaction) {
   }
 }
 
-function dropCommandErrorMessage(error) {
+function dropCommandErrorMessage(error, action) {
   if (error instanceof SignupNotFoundError) {
     return "That person is not on this drop.";
+  }
+  if (error instanceof DropAlreadySettledError) {
+    return formatDropSettleReply(action, error.dropStatus);
   }
   if (error instanceof DropValidationError || error instanceof DropNotFoundError) {
     return error.message;
@@ -132,7 +140,7 @@ class Drop extends SlashCommand {
     super(client, {
       name: DROP_COMMAND_NAME,
       description: "Create and manage bottle drops",
-      usage: "/drop create | list | remove | pickup | export",
+      usage: "/drop create | close | cancel | list | remove | pickup | export",
       enabled: true,
       permLevel: "User",
     });
@@ -188,6 +196,16 @@ class Drop extends SlashCommand {
               .setRequired(false)
               .setMaxLength(600)
           )
+      )
+      .addSubcommand((subcommand) =>
+        addDropOption(
+          subcommand.setName("close").setDescription("Close a drop and post the allocated list (mods only)")
+        )
+      )
+      .addSubcommand((subcommand) =>
+        addDropOption(
+          subcommand.setName("cancel").setDescription("Cancel a drop and update the post (mods only)")
+        )
       )
       .addSubcommand((subcommand) =>
         addDropOption(
@@ -256,6 +274,12 @@ class Drop extends SlashCommand {
     const subcommand = interaction.options?.getSubcommand?.(false) || "create";
     if (subcommand === "create") {
       return this.executeCreate(interaction);
+    }
+    if (subcommand === "close") {
+      return this.executeClose(interaction);
+    }
+    if (subcommand === "cancel") {
+      return this.executeCancel(interaction);
     }
     if (subcommand === "list") {
       return this.executeList(interaction);
@@ -343,10 +367,28 @@ class Drop extends SlashCommand {
         ...draft,
         messageId: posted.id,
       });
+      let scheduled;
+      if (typeof this.client?.dropCloser?.schedule === "function") {
+        scheduled = await this.client.dropCloser.schedule(drop);
+      }
+      const current = store.getDrop(drop.id) || drop;
+      if (!isDropOpen(current)) {
+        let postedOk = scheduled?.postUpdated === true;
+        if (!postedOk) {
+          postedOk = await this.ensureCreatedDropSettled(posted, current);
+        }
+        const ack = postedOk
+          ? "Drop posted and closed (the close time was already past)."
+          : "The drop closed because the close time was already past, but the public post could not be updated. Try /drop close.";
+        if (typeof interaction.channel?.send === "function" || !postedOk) {
+          await tryReplyPrivately(interaction, ack, this.client?.logger);
+        }
+        return current;
+      }
       if (typeof interaction.channel?.send === "function") {
         await tryReplyPrivately(interaction, "Drop posted.", this.client?.logger);
       }
-      return drop;
+      return current;
     } catch (error) {
       this.client?.logger?.error(error, "drop create");
       try {
@@ -385,6 +427,69 @@ class Drop extends SlashCommand {
     }
     await replyPrivately(interaction, DROP_MANAGE_DENIED);
     return true;
+  }
+
+  async executeSettle(interaction, { action, status, successMessage }) {
+    if (await this.denyUnlessDropManager(interaction)) {
+      return;
+    }
+
+    await deferPrivately(interaction);
+
+    try {
+      const store = this.requireDropStore();
+      const drop = this.resolveCommandDrop(interaction);
+      let result;
+      try {
+        result = store.setDropStatus(drop.id, status);
+      } catch (error) {
+        if (error instanceof DropAlreadySettledError) {
+          const posted = await this.updatePostedDrop(interaction, drop);
+          const settle = formatDropSettleReply(action, error.dropStatus);
+          await replyPrivately(
+            interaction,
+            posted ? settle : `${settle} The post could not be updated.`
+          );
+          return;
+        }
+        throw error;
+      }
+      this.client?.dropCloser?.unschedule?.(drop.id);
+      const posted = await this.updatePostedDrop(interaction, result.drop);
+      await replyPrivately(
+        interaction,
+        formatDropPostUpdateReply({
+          action,
+          alreadySettled: result.alreadySettled,
+          posted,
+          status: result.drop.status,
+        }) || successMessage
+      );
+      return result;
+    } catch (error) {
+      const message = dropCommandErrorMessage(error, action);
+      if (message) {
+        await replyPrivately(interaction, message);
+        return;
+      }
+      throw error;
+    }
+  }
+
+  async executeClose(interaction) {
+    return this.executeSettle(interaction, {
+      action: "close",
+      status: "closed",
+      successMessage: "Drop closed. Final allocated list posted.",
+    });
+  }
+
+  async executeCancel(interaction) {
+    return this.executeSettle(interaction, {
+      action: "cancel",
+      status: "canceled",
+      successMessage: "Drop canceled.",
+    });
   }
 
   async executeList(interaction) {
@@ -555,24 +660,66 @@ class Drop extends SlashCommand {
     }
   }
 
-  async updatePostedDrop(interaction, drop) {
-    const counts = signupCountsForDrop(this.client?.drops, drop);
-    const payload = buildDropMessage(drop, counts);
+  async ensureCreatedDropSettled(posted, drop) {
+    const payload = buildStoredDropMessage(this.client?.drops, drop);
     try {
+      if (typeof posted?.edit === "function") {
+        await posted.edit(payload);
+        return true;
+      }
+      const edited = await editDropPost(this.client, drop, payload);
+      if (!edited) {
+        this.client?.logger?.error(
+          new Error("no message.edit path for drop post"),
+          "drop create close post"
+        );
+      }
+      return Boolean(edited);
+    } catch (error) {
+      this.client?.logger?.error(error, "drop create close post");
+      return false;
+    }
+  }
+
+  async updatePostedDrop(interaction, drop) {
+    const store = this.client?.drops;
+    const editPayload = async (target, payload) => {
       if (typeof interaction?.message?.edit === "function") {
         await interaction.message.edit(payload);
-        return;
+        return true;
       }
-      if (drop.messageId && typeof interaction?.channel?.messages?.edit === "function") {
-        await interaction.channel.messages.edit(drop.messageId, payload);
-        return;
+      if (
+        target.messageId &&
+        typeof interaction?.channel?.messages?.edit === "function" &&
+        (!interaction.channelId || interaction.channelId === target.channelId)
+      ) {
+        await interaction.channel.messages.edit(target.messageId, payload);
+        return true;
       }
-      this.client?.logger?.error(
-        new Error("no message.edit path for drop sign-up count"),
-        "drop in count update"
-      );
+      return editDropPost(this.client, target, payload);
+    };
+
+    try {
+      const current =
+        drop?.id && typeof store?.getDrop === "function" ? store.getDrop(drop.id) || drop : drop;
+      const payload = buildStoredDropMessage(store, current);
+      const edited = await editPayload(current, payload);
+      if (!edited) {
+        this.client?.logger?.error(
+          new Error("no message.edit path for drop post"),
+          "drop post update"
+        );
+        return false;
+      }
+      const after =
+        drop?.id && typeof store?.getDrop === "function" ? store.getDrop(drop.id) : null;
+      if (after && !isDropOpen(after) && isDropOpen(current)) {
+        await editPayload(after, buildStoredDropMessage(store, after));
+      }
+      return true;
     } catch (error) {
-      this.client?.logger?.error(error, "drop in count update");
+      this.client?.logger?.error(error, "drop post update");
+      return false;
     }
   }
 

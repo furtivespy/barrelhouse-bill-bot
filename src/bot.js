@@ -12,6 +12,7 @@ import {
 } from "discord.js";
 import BunEnmap from "./db/BunEnmap.js";
 import DropStore from "./db/drops.js";
+import DropCloser from "./util/dropCloser.js";
 import { resolveConfigPath } from "./db/dataDir.js";
 import permLevels from "./config.permissionLevels.js";
 import {
@@ -82,6 +83,7 @@ class DiscordBot extends Client {
       dataDir,
     });
     this.drops = new DropStore({ dataDir });
+    this.dropCloser = new DropCloser(this);
     this.dataStores = [this.settings, this.drops];
     this.settings.ensure("default", this.config.defaultSettings);
 

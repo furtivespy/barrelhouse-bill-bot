@@ -344,6 +344,8 @@ describe("/drop list, remove, pickup, export", () => {
     expect(json.default_member_permissions).toBe(String(PermissionsBitField.Flags.ManageMessages));
     expect(json.options.map((option) => option.name)).toEqual([
       "create",
+      "close",
+      "cancel",
       "list",
       "remove",
       "pickup",
@@ -377,13 +379,13 @@ describe("/drop list, remove, pickup, export", () => {
     store.close();
   });
 
-  test("denies list/remove/pickup/export without Manage Messages", async () => {
+  test("denies close/cancel/list/remove/pickup/export without Manage Messages", async () => {
     const store = memoryDrops();
     seedLimitedDrop(store);
     const command = new Drop(dropClient(store));
     const replies = [];
 
-    for (const subcommand of ["list", "remove", "pickup", "export"]) {
+    for (const subcommand of ["close", "cancel", "list", "remove", "pickup", "export"]) {
       const interaction = commandInteraction({
         subcommand,
         values: {

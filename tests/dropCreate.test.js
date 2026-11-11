@@ -7,6 +7,8 @@ import {
 import Drop from "../src/commands/slash/drop.js";
 import DropStore from "../src/db/drops.js";
 import {
+  ALLOCATED_FIELD_LIMIT,
+  ALLOCATED_TRUNCATION,
   DROP_COMMAND_NAME,
   DROP_EMBED_COLOR,
   IN_BUTTON_PREFIX,
@@ -15,6 +17,8 @@ import {
   buildDropEmbed,
   buildDropMessage,
   countSignups,
+  formatAllocatedList,
+  formatDropStatus,
   formatSignupCounts,
   inButtonCustomId,
   parseCloseTime,
@@ -286,6 +290,7 @@ describe("drop embed and In button rendering", () => {
     expect(embed.title).toBe("EH Taylor Small Batch");
     expect(embed.description).toBe("Cherry, oak, and a little rye spice.");
     expect(embed.color).toBe(DROP_EMBED_COLOR);
+    expect(embed.footer.text).toBe("Open");
     expect(embed.fields).toEqual(
       expect.arrayContaining([
         { name: "Price", value: "$59.99", inline: true },
@@ -301,6 +306,7 @@ describe("drop embed and In button rendering", () => {
     expect(row.components[0].label).toBe("In");
     expect(row.components[0].custom_id).toBe("drop:in:drop-1");
     expect(row.components[0].style).toBe(ButtonStyle.Success);
+    expect(row.components[0].disabled).toBeFalsy();
     expect(inButtonCustomId(drop.id).startsWith("drop:")).toBe(true);
     expect(inButtonCustomId(drop.id).startsWith(IN_BUTTON_PREFIX)).toBe(true);
     expect(parseInButtonCustomId("drop:in:drop-1")).toBe("drop-1");
@@ -326,6 +332,71 @@ describe("drop embed and In button rendering", () => {
     expect(embed.fields).toEqual([
       { name: "Sign-ups", value: "0 in, 0 waitlisted", inline: false },
     ]);
+  });
+
+  test("closed posts show Closed, the allocated list, and a disabled In button", () => {
+    const drop = {
+      id: "drop-closed",
+      bottleName: "EH Taylor Small Batch",
+      description: null,
+      price: null,
+      location: null,
+      bottleLimit: 2,
+      closeTime: null,
+      status: "closed",
+    };
+    const signups = [
+      { userId: "user-1", status: "allocated" },
+      { userId: "user-2", status: "allocated" },
+      { userId: "user-3", status: "waitlist" },
+    ];
+    const payload = buildDropMessage(
+      drop,
+      { allocated: 2, waitlisted: 1, bottleLimit: 2 },
+      { signups }
+    );
+    const embed = payload.embeds[0].toJSON();
+    expect(formatDropStatus("closed")).toBe("Closed");
+    expect(embed.footer.text).toBe("Closed");
+    expect(embed.fields).toEqual(
+      expect.arrayContaining([
+        { name: "Sign-ups", value: "2/2 in, 1 waitlisted", inline: false },
+        { name: "Allocated", value: "1. <@user-1>\n2. <@user-2>", inline: false },
+      ])
+    );
+    expect(embed.fields.some((field) => field.name === "Allocated")).toBe(true);
+    expect(payload.components[0].toJSON().components[0].disabled).toBe(true);
+    expect(formatAllocatedList(signups)).toBe("1. <@user-1>\n2. <@user-2>");
+  });
+
+  test("canceled posts show Canceled and a disabled In button without an allocated list", () => {
+    const payload = buildDropMessage(
+      {
+        id: "drop-canceled",
+        bottleName: "Eagle Rare",
+        status: "canceled",
+      },
+      { allocated: 1, waitlisted: 0 }
+    );
+    const embed = payload.embeds[0].toJSON();
+    expect(formatDropStatus("canceled")).toBe("Canceled");
+    expect(embed.footer.text).toBe("Canceled");
+    expect(embed.fields.some((field) => field.name === "Allocated")).toBe(false);
+    expect(payload.components[0].toJSON().components[0].disabled).toBe(true);
+  });
+
+  test("allocated list truncates on a whole mention, not mid-tag", () => {
+    const signups = Array.from({ length: 80 }, (_, i) => ({
+      userId: `user-${String(i).padStart(18, "0")}`,
+      status: "allocated",
+    }));
+    const text = formatAllocatedList(signups);
+    expect(text.length).toBeLessThanOrEqual(ALLOCATED_FIELD_LIMIT);
+    expect(text.endsWith(ALLOCATED_TRUNCATION)).toBe(true);
+    const body = text.slice(0, -ALLOCATED_TRUNCATION.length);
+    expect(body.endsWith(">")).toBe(true);
+    expect((body.match(/<@/g) || []).length).toBe((body.match(/>/g) || []).length);
+    expect(body).not.toMatch(/<@[^>]*$/);
   });
 });
 
