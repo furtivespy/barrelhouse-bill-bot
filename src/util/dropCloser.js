@@ -28,6 +28,12 @@ class DropCloser {
     this.timers.clear();
   }
 
+  msUntilClose(drop) {
+    if (!drop?.closeTime) return null;
+    const remaining = new Date(drop.closeTime).getTime() - this.now();
+    return Number.isFinite(remaining) ? remaining : null;
+  }
+
   schedule(drop) {
     if (!drop?.id) return;
     this.unschedule(drop.id);
@@ -35,8 +41,15 @@ class DropCloser {
       return;
     }
 
-    const remaining = new Date(drop.closeTime).getTime() - this.now();
-    if (!Number.isFinite(remaining) || remaining <= 0) {
+    const remaining = this.msUntilClose(drop);
+    if (remaining == null) {
+      this.client?.logger?.error(
+        new Error(`invalid close time on drop ${drop.id}`),
+        "drop auto-close"
+      );
+      return;
+    }
+    if (remaining <= 0) {
       return this.closeDueDrop(drop.id);
     }
 
@@ -53,17 +66,39 @@ class DropCloser {
   async reschedulePending() {
     const store = this.client?.drops;
     const drops = typeof store?.listPendingCloses === "function" ? store.listPendingCloses() : [];
-    const due = [];
     for (const drop of drops) {
-      const remaining = new Date(drop.closeTime).getTime() - this.now();
-      if (!Number.isFinite(remaining) || remaining <= 0) {
-        due.push(this.closeDueDrop(drop.id));
+      const remaining = this.msUntilClose(drop);
+      if (remaining == null) {
+        this.client?.logger?.error(
+          new Error(`invalid close time on drop ${drop.id}`),
+          "drop auto-close"
+        );
+        continue;
+      }
+      if (remaining <= 0) {
+        await this.closeDueDrop(drop.id);
       } else {
         this.schedule(drop);
       }
     }
-    await Promise.allSettled(due);
     return drops.length;
+  }
+
+  async syncClosedPost(drop) {
+    const store = this.client?.drops;
+    try {
+      const edited = await editDropPost(this.client, drop, buildStoredDropMessage(store, drop));
+      if (!edited) {
+        this.client?.logger?.error(
+          new Error("no message.edit path for drop auto-close"),
+          "drop auto-close post"
+        );
+      }
+      return Boolean(edited);
+    } catch (error) {
+      this.client?.logger?.error(error, "drop auto-close post");
+      return false;
+    }
   }
 
   async closeDueDrop(dropId) {
@@ -83,15 +118,8 @@ class DropCloser {
       this.client?.logger?.error(error, "drop auto-close");
       return;
     }
-    if (result.alreadySettled) {
-      return result;
-    }
 
-    try {
-      await editDropPost(this.client, result.drop, buildStoredDropMessage(store, result.drop));
-    } catch (error) {
-      this.client?.logger?.error(error, "drop auto-close post");
-    }
+    await this.syncClosedPost(result.drop);
     return result;
   }
 }

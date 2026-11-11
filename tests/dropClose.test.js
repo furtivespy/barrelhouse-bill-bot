@@ -3,7 +3,6 @@ import { ButtonStyle, MessageFlags, PermissionsBitField } from "discord.js";
 import Drop from "../src/commands/slash/drop.js";
 import DropStore from "../src/db/drops.js";
 import Ready from "../src/events/ready.js";
-import { DROP_MANAGE_DENIED } from "../src/util/dropMod.js";
 import { DropCloser, MAX_TIMEOUT_MS } from "../src/util/dropCloser.js";
 import { formatDropSettleReply, inButtonCustomId } from "../src/util/dropPost.js";
 
@@ -363,6 +362,89 @@ describe("/drop close and /drop cancel", () => {
     expect(store.listSignups("drop-1").every((row) => row.userId !== "user-9")).toBe(true);
     store.close();
   });
+
+  test("tells the mod when the drop closed but the post could not be updated", async () => {
+    const store = memoryDrops();
+    seedOpenDrop(store);
+    const command = new Drop(dropClient(store));
+    const interaction = commandInteraction({
+      subcommand: "close",
+      extras: {
+        channel: {
+          messages: {
+            edit: async () => {
+              throw new Error("Missing Permissions");
+            },
+          },
+        },
+      },
+    });
+
+    await command.execute(interaction);
+
+    expect(store.getDrop("drop-1").status).toBe("closed");
+    expect(privatePayload(interaction)).toEqual({
+      content: "Drop closed, but the post could not be updated. Try /drop close again.",
+    });
+    store.close();
+  });
+
+  test("a second close still refreshes the post after a failed first edit", async () => {
+    const store = memoryDrops();
+    seedOpenDrop(store);
+    const command = new Drop(dropClient(store));
+    await command.execute(
+      commandInteraction({
+        subcommand: "close",
+        extras: {
+          channel: {
+            messages: {
+              edit: async () => {
+                throw new Error("Unknown Message");
+              },
+            },
+          },
+        },
+      })
+    );
+
+    const retry = commandInteraction({ subcommand: "close" });
+    await command.execute(retry);
+
+    expect(privatePayload(retry)).toEqual({ content: "That drop is already closed." });
+    expect(retry.channelEdits).toHaveLength(1);
+    expect(retry.channelEdits[0].payload.embeds[0].toJSON().footer.text).toBe("Closed");
+    expect(retry.channelEdits[0].payload.components[0].toJSON().components[0].disabled).toBe(true);
+    store.close();
+  });
+
+  test("In post update re-reads the drop so a close is not overwritten with Open", async () => {
+    const store = memoryDrops();
+    const drop = seedOpenDrop(store);
+    const command = new Drop(dropClient(store));
+    const edits = [];
+
+    store.joinSignup(drop.id, "user-9");
+    store.setDropStatus(drop.id, "closed");
+    await command.updatePostedDrop(
+      {
+        message: {
+          edit: async (payload) => {
+            edits.push(payload);
+          },
+        },
+      },
+      { ...drop, status: "open" }
+    );
+
+    expect(store.getDrop(drop.id).status).toBe("closed");
+    expect(edits[0].embeds[0].toJSON().footer.text).toBe("Closed");
+    expect(edits[0].components[0].toJSON().components[0].disabled).toBe(true);
+    const allocated = edits[0].embeds[0].toJSON().fields.find((field) => field.name === "Allocated");
+    expect(allocated.value).toContain("<@user-1>");
+    expect(allocated.value).toContain("<@user-2>");
+    store.close();
+  });
 });
 
 describe("DropCloser", () => {
@@ -494,6 +576,127 @@ describe("DropCloser", () => {
 
     expect(scheduled).toEqual([drop.id]);
     expect(drop.closeTime).toBe("2026-10-24T18:00:00.000Z");
+    store.close();
+  });
+
+  test("create with a past close time closes immediately and edits the post", async () => {
+    const store = memoryDrops();
+    const edits = [];
+    const clock = createClock(Date.parse("2026-10-24T20:00:00.000Z"));
+    const client = channelClient(store, edits);
+    client.dropCloser = new DropCloser(client, clock);
+    const command = new Drop(client);
+    const privates = [];
+    const interaction = {
+      guildId: "guild-1",
+      channelId: "channel-1",
+      user: { id: "mod-1" },
+      deferred: false,
+      replied: false,
+      options: optionBag({
+        subcommand: "create",
+        bottle: "Weller",
+        close_time: "2026-10-24T18:00:00Z",
+      }),
+      deferReply: async () => {
+        interaction.deferred = true;
+      },
+      editReply: async (payload) => privates.push(payload),
+      channel: {
+        send: async () => ({ id: "msg-create" }),
+      },
+    };
+    const drop = await command.execute(interaction);
+
+    expect(drop.status).toBe("closed");
+    expect(store.getDrop(drop.id).status).toBe("closed");
+    expect(edits[0].messageId).toBe("msg-create");
+    expect(edits[0].payload.embeds[0].toJSON().footer.text).toBe("Closed");
+    expect(edits[0].payload.components[0].toJSON().components[0].disabled).toBe(true);
+    expect(privates).toEqual([
+      { content: "Drop posted and closed (the close time was already past)." },
+    ]);
+    client.dropCloser.stop();
+    store.close();
+  });
+
+  test("logs when auto-close cannot find a message edit path", async () => {
+    const store = memoryDrops();
+    const drop = seedOpenDrop(store, { closeTime: "2026-10-24T18:00:00.000Z" });
+    const logger = silentLogger();
+    const closer = new DropCloser(dropClient(store, { logger }));
+    await closer.closeDueDrop(drop.id);
+    expect(store.getDrop(drop.id).status).toBe("closed");
+    expect(String(logger.errors[0]?.message || logger.errors[0])).toMatch(/no message\.edit path/);
+    store.close();
+  });
+
+  test("logs when auto-close channel fetch throws and still marks the drop closed", async () => {
+    const store = memoryDrops();
+    const drop = seedOpenDrop(store, { closeTime: "2026-10-24T18:00:00.000Z" });
+    const logger = silentLogger();
+    const closer = new DropCloser(
+      dropClient(store, {
+        logger,
+        channels: {
+          cache: { get: () => null },
+          fetch: async () => {
+            throw new Error("Unknown Channel");
+          },
+        },
+      })
+    );
+    await closer.closeDueDrop(drop.id);
+    expect(store.getDrop(drop.id).status).toBe("closed");
+    expect(String(logger.errors[0]?.message || logger.errors[0])).toMatch(/Unknown Channel/);
+    store.close();
+  });
+
+  test("already-closed auto-close still tries to refresh the post", async () => {
+    const store = memoryDrops();
+    const drop = seedOpenDrop(store, { closeTime: "2026-10-24T18:00:00.000Z" });
+    store.setDropStatus(drop.id, "closed");
+    const edits = [];
+    const closer = new DropCloser(channelClient(store, edits));
+    await closer.closeDueDrop(drop.id);
+    expect(edits).toHaveLength(1);
+    expect(edits[0].payload.embeds[0].toJSON().footer.text).toBe("Closed");
+    store.close();
+  });
+
+  test("reschedulePending closes overdue drops one after another", async () => {
+    const store = memoryDrops();
+    seedOpenDrop(store, {
+      id: "due-1",
+      closeTime: "2026-10-24T17:00:00.000Z",
+      messageId: "msg-due-1",
+    });
+    seedOpenDrop(store, {
+      id: "due-2",
+      bottleName: "Second",
+      closeTime: "2026-10-24T17:30:00.000Z",
+      messageId: "msg-due-2",
+    });
+    const order = [];
+    const clock = createClock(Date.parse("2026-10-24T18:00:00.000Z"));
+    const client = channelClient(store, []);
+    client.channels.cache.get = (id) =>
+      id === "channel-1"
+        ? {
+            messages: {
+              edit: async (messageId, payload) => {
+                order.push(messageId);
+                return payload;
+              },
+            },
+          }
+        : undefined;
+    const closer = new DropCloser(client, clock);
+    await closer.reschedulePending();
+    expect(store.getDrop("due-1").status).toBe("closed");
+    expect(store.getDrop("due-2").status).toBe("closed");
+    expect(order).toEqual(["msg-due-1", "msg-due-2"]);
+    closer.stop();
     store.close();
   });
 });

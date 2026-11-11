@@ -166,12 +166,34 @@ function formatAllocatedList(signups = []) {
   const allocated = signups.filter((row) => row?.status === "allocated");
   if (!allocated.length) return "_None_";
   const lines = allocated.map((row, index) => `${index + 1}. <@${row.userId}>`);
-  let text = lines.join("\n");
-  if (text.length > ALLOCATED_FIELD_LIMIT) {
-    const keep = ALLOCATED_FIELD_LIMIT - ALLOCATED_TRUNCATION.length;
-    text = `${text.slice(0, Math.max(0, keep)).trimEnd()}${ALLOCATED_TRUNCATION}`;
+  const text = lines.join("\n");
+  if (text.length <= ALLOCATED_FIELD_LIMIT) return text;
+
+  const budget = ALLOCATED_FIELD_LIMIT - ALLOCATED_TRUNCATION.length;
+  const kept = [];
+  let size = 0;
+  for (const line of lines) {
+    const extra = kept.length === 0 ? line.length : line.length + 1;
+    if (size + extra > budget) break;
+    kept.push(line);
+    size += extra;
   }
-  return text;
+  return `${kept.join("\n")}${ALLOCATED_TRUNCATION}`;
+}
+
+function formatDropPostUpdateReply({ action, alreadySettled, posted, status }) {
+  if (alreadySettled) {
+    const settle = formatDropSettleReply(action, status);
+    return posted ? settle : `${settle} The post could not be updated.`;
+  }
+  if (action === "close") {
+    return posted
+      ? "Drop closed. Final allocated list posted."
+      : "Drop closed, but the post could not be updated. Try /drop close again.";
+  }
+  return posted
+    ? "Drop canceled."
+    : "Drop canceled, but the post could not be updated. Try /drop cancel again.";
 }
 
 function discordTimestamp(iso) {
@@ -308,7 +330,9 @@ export {
   formatDropClosedReply,
   formatDropStatus,
   formatDropSettleReply,
+  formatDropPostUpdateReply,
   formatAllocatedList,
+  ALLOCATED_TRUNCATION,
   discordTimestamp,
   inButtonCustomId,
   parseInButtonCustomId,

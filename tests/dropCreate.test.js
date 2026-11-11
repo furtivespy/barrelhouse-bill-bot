@@ -7,6 +7,8 @@ import {
 import Drop from "../src/commands/slash/drop.js";
 import DropStore from "../src/db/drops.js";
 import {
+  ALLOCATED_FIELD_LIMIT,
+  ALLOCATED_TRUNCATION,
   DROP_COMMAND_NAME,
   DROP_EMBED_COLOR,
   IN_BUTTON_PREFIX,
@@ -381,6 +383,20 @@ describe("drop embed and In button rendering", () => {
     expect(embed.footer.text).toBe("Canceled");
     expect(embed.fields.some((field) => field.name === "Allocated")).toBe(false);
     expect(payload.components[0].toJSON().components[0].disabled).toBe(true);
+  });
+
+  test("allocated list truncates on a whole mention, not mid-tag", () => {
+    const signups = Array.from({ length: 80 }, (_, i) => ({
+      userId: `user-${String(i).padStart(18, "0")}`,
+      status: "allocated",
+    }));
+    const text = formatAllocatedList(signups);
+    expect(text.length).toBeLessThanOrEqual(ALLOCATED_FIELD_LIMIT);
+    expect(text.endsWith(ALLOCATED_TRUNCATION)).toBe(true);
+    const body = text.slice(0, -ALLOCATED_TRUNCATION.length);
+    expect(body.endsWith(">")).toBe(true);
+    expect((body.match(/<@/g) || []).length).toBe((body.match(/>/g) || []).length);
+    expect(body).not.toMatch(/<@[^>]*$/);
   });
 });
 

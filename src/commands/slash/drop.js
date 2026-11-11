@@ -33,6 +33,7 @@ import {
   buildStoredDropMessage,
   editDropPost,
   formatDropClosedReply,
+  formatDropPostUpdateReply,
   formatDropSettleReply,
   formatJoinReply,
   parseDropCreateInput,
@@ -368,10 +369,15 @@ class Drop extends SlashCommand {
       if (typeof this.client?.dropCloser?.schedule === "function") {
         await this.client.dropCloser.schedule(drop);
       }
+      const current = store.getDrop(drop.id) || drop;
       if (typeof interaction.channel?.send === "function") {
-        await tryReplyPrivately(interaction, "Drop posted.", this.client?.logger);
+        const posted =
+          current.status === "closed"
+            ? "Drop posted and closed (the close time was already past)."
+            : "Drop posted.";
+        await tryReplyPrivately(interaction, posted, this.client?.logger);
       }
-      return this.client?.drops?.getDrop?.(drop.id) || drop;
+      return current;
     } catch (error) {
       this.client?.logger?.error(error, "drop create");
       try {
@@ -412,7 +418,7 @@ class Drop extends SlashCommand {
     return true;
   }
 
-  async executeClose(interaction) {
+  async executeSettle(interaction, { action, status, successMessage }) {
     if (await this.denyUnlessDropManager(interaction)) {
       return;
     }
@@ -422,17 +428,21 @@ class Drop extends SlashCommand {
     try {
       const store = this.requireDropStore();
       const drop = this.resolveCommandDrop(interaction);
-      const result = store.setDropStatus(drop.id, "closed");
+      const result = store.setDropStatus(drop.id, status);
       this.client?.dropCloser?.unschedule?.(drop.id);
-      if (result.alreadySettled) {
-        await replyPrivately(interaction, formatDropSettleReply("close", result.drop.status));
-        return result;
-      }
-      await this.updatePostedDrop(interaction, result.drop);
-      await replyPrivately(interaction, "Drop closed. Final allocated list posted.");
+      const posted = await this.updatePostedDrop(interaction, result.drop);
+      await replyPrivately(
+        interaction,
+        formatDropPostUpdateReply({
+          action,
+          alreadySettled: result.alreadySettled,
+          posted,
+          status: result.drop.status,
+        }) || successMessage
+      );
       return result;
     } catch (error) {
-      const message = dropCommandErrorMessage(error, "close");
+      const message = dropCommandErrorMessage(error, action);
       if (message) {
         await replyPrivately(interaction, message);
         return;
@@ -441,33 +451,20 @@ class Drop extends SlashCommand {
     }
   }
 
+  async executeClose(interaction) {
+    return this.executeSettle(interaction, {
+      action: "close",
+      status: "closed",
+      successMessage: "Drop closed. Final allocated list posted.",
+    });
+  }
+
   async executeCancel(interaction) {
-    if (await this.denyUnlessDropManager(interaction)) {
-      return;
-    }
-
-    await deferPrivately(interaction);
-
-    try {
-      const store = this.requireDropStore();
-      const drop = this.resolveCommandDrop(interaction);
-      const result = store.setDropStatus(drop.id, "canceled");
-      this.client?.dropCloser?.unschedule?.(drop.id);
-      if (result.alreadySettled) {
-        await replyPrivately(interaction, formatDropSettleReply("cancel", result.drop.status));
-        return result;
-      }
-      await this.updatePostedDrop(interaction, result.drop);
-      await replyPrivately(interaction, "Drop canceled.");
-      return result;
-    } catch (error) {
-      const message = dropCommandErrorMessage(error, "cancel");
-      if (message) {
-        await replyPrivately(interaction, message);
-        return;
-      }
-      throw error;
-    }
+    return this.executeSettle(interaction, {
+      action: "cancel",
+      status: "canceled",
+      successMessage: "Drop canceled.",
+    });
   }
 
   async executeList(interaction) {
@@ -639,29 +636,35 @@ class Drop extends SlashCommand {
   }
 
   async updatePostedDrop(interaction, drop) {
-    const payload = buildStoredDropMessage(this.client?.drops, drop);
+    const store = this.client?.drops;
+    const current =
+      drop?.id && typeof store?.getDrop === "function" ? store.getDrop(drop.id) || drop : drop;
+    const payload = buildStoredDropMessage(store, current);
     try {
       if (typeof interaction?.message?.edit === "function") {
         await interaction.message.edit(payload);
-        return;
+        return true;
       }
       if (
-        drop.messageId &&
+        current.messageId &&
         typeof interaction?.channel?.messages?.edit === "function" &&
-        (!interaction.channelId || interaction.channelId === drop.channelId)
+        (!interaction.channelId || interaction.channelId === current.channelId)
       ) {
-        await interaction.channel.messages.edit(drop.messageId, payload);
-        return;
+        await interaction.channel.messages.edit(current.messageId, payload);
+        return true;
       }
-      const edited = await editDropPost(this.client, drop, payload);
+      const edited = await editDropPost(this.client, current, payload);
       if (!edited) {
         this.client?.logger?.error(
           new Error("no message.edit path for drop post"),
           "drop post update"
         );
+        return false;
       }
+      return true;
     } catch (error) {
       this.client?.logger?.error(error, "drop post update");
+      return false;
     }
   }
 
