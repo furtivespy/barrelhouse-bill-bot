@@ -178,6 +178,7 @@ function formatAllocatedList(signups = []) {
     kept.push(line);
     size += extra;
   }
+  if (kept.length === 0) return ALLOCATED_TRUNCATION.trim();
   return `${kept.join("\n")}${ALLOCATED_TRUNCATION}`;
 }
 
@@ -289,12 +290,14 @@ function buildDropMessage(drop, counts, { signups } = {}) {
 }
 
 function buildStoredDropMessage(store, drop) {
-  const signups = typeof store?.listSignups === "function" ? store.listSignups(drop.id) : [];
+  const resolved =
+    drop?.id && typeof store?.getDrop === "function" ? store.getDrop(drop.id) || drop : drop;
+  const signups = typeof store?.listSignups === "function" ? store.listSignups(resolved.id) : [];
   return buildDropMessage(
-    drop,
+    resolved,
     {
       ...countSignups(signups),
-      bottleLimit: drop.bottleLimit ?? null,
+      bottleLimit: resolved.bottleLimit ?? null,
     },
     { signups }
   );

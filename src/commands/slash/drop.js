@@ -36,6 +36,7 @@ import {
   formatDropPostUpdateReply,
   formatDropSettleReply,
   formatJoinReply,
+  isDropOpen,
   parseDropCreateInput,
   parseInButtonCustomId,
   readCreateOptions,
@@ -366,16 +367,26 @@ class Drop extends SlashCommand {
         ...draft,
         messageId: posted.id,
       });
+      let scheduled;
       if (typeof this.client?.dropCloser?.schedule === "function") {
-        await this.client.dropCloser.schedule(drop);
+        scheduled = await this.client.dropCloser.schedule(drop);
       }
       const current = store.getDrop(drop.id) || drop;
+      if (!isDropOpen(current)) {
+        let postedOk = scheduled?.postUpdated === true;
+        if (!postedOk) {
+          postedOk = await this.ensureCreatedDropSettled(posted, current);
+        }
+        const ack = postedOk
+          ? "Drop posted and closed (the close time was already past)."
+          : "The drop closed because the close time was already past, but the public post could not be updated. Try /drop close.";
+        if (typeof interaction.channel?.send === "function" || !postedOk) {
+          await tryReplyPrivately(interaction, ack, this.client?.logger);
+        }
+        return current;
+      }
       if (typeof interaction.channel?.send === "function") {
-        const posted =
-          current.status === "closed"
-            ? "Drop posted and closed (the close time was already past)."
-            : "Drop posted.";
-        await tryReplyPrivately(interaction, posted, this.client?.logger);
+        await tryReplyPrivately(interaction, "Drop posted.", this.client?.logger);
       }
       return current;
     } catch (error) {
@@ -428,7 +439,21 @@ class Drop extends SlashCommand {
     try {
       const store = this.requireDropStore();
       const drop = this.resolveCommandDrop(interaction);
-      const result = store.setDropStatus(drop.id, status);
+      let result;
+      try {
+        result = store.setDropStatus(drop.id, status);
+      } catch (error) {
+        if (error instanceof DropAlreadySettledError) {
+          const posted = await this.updatePostedDrop(interaction, drop);
+          const settle = formatDropSettleReply(action, error.dropStatus);
+          await replyPrivately(
+            interaction,
+            posted ? settle : `${settle} The post could not be updated.`
+          );
+          return;
+        }
+        throw error;
+      }
       this.client?.dropCloser?.unschedule?.(drop.id);
       const posted = await this.updatePostedDrop(interaction, result.drop);
       await replyPrivately(
@@ -635,31 +660,61 @@ class Drop extends SlashCommand {
     }
   }
 
+  async ensureCreatedDropSettled(posted, drop) {
+    const payload = buildStoredDropMessage(this.client?.drops, drop);
+    try {
+      if (typeof posted?.edit === "function") {
+        await posted.edit(payload);
+        return true;
+      }
+      const edited = await editDropPost(this.client, drop, payload);
+      if (!edited) {
+        this.client?.logger?.error(
+          new Error("no message.edit path for drop post"),
+          "drop create close post"
+        );
+      }
+      return Boolean(edited);
+    } catch (error) {
+      this.client?.logger?.error(error, "drop create close post");
+      return false;
+    }
+  }
+
   async updatePostedDrop(interaction, drop) {
     const store = this.client?.drops;
-    const current =
-      drop?.id && typeof store?.getDrop === "function" ? store.getDrop(drop.id) || drop : drop;
-    const payload = buildStoredDropMessage(store, current);
-    try {
+    const editPayload = async (target, payload) => {
       if (typeof interaction?.message?.edit === "function") {
         await interaction.message.edit(payload);
         return true;
       }
       if (
-        current.messageId &&
+        target.messageId &&
         typeof interaction?.channel?.messages?.edit === "function" &&
-        (!interaction.channelId || interaction.channelId === current.channelId)
+        (!interaction.channelId || interaction.channelId === target.channelId)
       ) {
-        await interaction.channel.messages.edit(current.messageId, payload);
+        await interaction.channel.messages.edit(target.messageId, payload);
         return true;
       }
-      const edited = await editDropPost(this.client, current, payload);
+      return editDropPost(this.client, target, payload);
+    };
+
+    try {
+      const current =
+        drop?.id && typeof store?.getDrop === "function" ? store.getDrop(drop.id) || drop : drop;
+      const payload = buildStoredDropMessage(store, current);
+      const edited = await editPayload(current, payload);
       if (!edited) {
         this.client?.logger?.error(
           new Error("no message.edit path for drop post"),
           "drop post update"
         );
         return false;
+      }
+      const after =
+        drop?.id && typeof store?.getDrop === "function" ? store.getDrop(drop.id) : null;
+      if (after && !isDropOpen(after) && isDropOpen(current)) {
+        await editPayload(after, buildStoredDropMessage(store, after));
       }
       return true;
     } catch (error) {

@@ -624,10 +624,14 @@ describe("DropCloser", () => {
     const store = memoryDrops();
     const drop = seedOpenDrop(store, { closeTime: "2026-10-24T18:00:00.000Z" });
     const logger = silentLogger();
-    const closer = new DropCloser(dropClient(store, { logger }));
-    await closer.closeDueDrop(drop.id);
+    const clock = createClock(Date.parse("2026-10-24T18:00:00.000Z"));
+    const closer = new DropCloser(dropClient(store, { logger }), clock);
+    const result = await closer.closeDueDrop(drop.id);
     expect(store.getDrop(drop.id).status).toBe("closed");
+    expect(result.postUpdated).toBe(false);
     expect(String(logger.errors[0]?.message || logger.errors[0])).toMatch(/no message\.edit path/);
+    expect(clock.size).toBe(0);
+    closer.stop();
     store.close();
   });
 
@@ -635,6 +639,7 @@ describe("DropCloser", () => {
     const store = memoryDrops();
     const drop = seedOpenDrop(store, { closeTime: "2026-10-24T18:00:00.000Z" });
     const logger = silentLogger();
+    const clock = createClock(Date.parse("2026-10-24T18:00:00.000Z"));
     const closer = new DropCloser(
       dropClient(store, {
         logger,
@@ -644,11 +649,15 @@ describe("DropCloser", () => {
             throw new Error("Unknown Channel");
           },
         },
-      })
+      }),
+      { ...clock, postRetryMs: 1_000 }
     );
-    await closer.closeDueDrop(drop.id);
+    const result = await closer.closeDueDrop(drop.id);
     expect(store.getDrop(drop.id).status).toBe("closed");
+    expect(result.postUpdated).toBe(false);
     expect(String(logger.errors[0]?.message || logger.errors[0])).toMatch(/Unknown Channel/);
+    expect(clock.size).toBe(1);
+    closer.stop();
     store.close();
   });
 
@@ -697,6 +706,175 @@ describe("DropCloser", () => {
     expect(store.getDrop("due-2").status).toBe("closed");
     expect(order).toEqual(["msg-due-1", "msg-due-2"]);
     closer.stop();
+    store.close();
+  });
+
+  test("retries a thrown auto-close post edit instead of leaving the post Open", async () => {
+    const store = memoryDrops();
+    const drop = seedOpenDrop(store, { closeTime: "2026-10-24T18:00:00.000Z" });
+    const edits = [];
+    let attempts = 0;
+    const clock = createClock(Date.parse("2026-10-24T18:00:00.000Z"));
+    const client = dropClient(store, {
+      channels: {
+        cache: {
+          get: (id) =>
+            id === "channel-1"
+              ? {
+                  messages: {
+                    edit: async (messageId, payload) => {
+                      attempts += 1;
+                      if (attempts === 1) {
+                        throw new Error("429: rate limited");
+                      }
+                      edits.push({ messageId, payload });
+                      return payload;
+                    },
+                  },
+                }
+              : undefined,
+        },
+      },
+    });
+    const closer = new DropCloser(client, { ...clock, postRetryMs: 1_000 });
+
+    const result = await closer.closeDueDrop(drop.id);
+    expect(store.getDrop(drop.id).status).toBe("closed");
+    expect(result.postUpdated).toBe(false);
+    expect(edits).toHaveLength(0);
+
+    await clock.advance(1_000);
+    expect(edits).toHaveLength(1);
+    expect(edits[0].payload.embeds[0].toJSON().footer.text).toBe("Closed");
+    expect(edits[0].payload.components[0].toJSON().components[0].disabled).toBe(true);
+    closer.stop();
+    store.close();
+  });
+
+  test("reschedulePending retries later if listing pending closes fails", async () => {
+    const store = memoryDrops();
+    const due = seedOpenDrop(store, { closeTime: "2026-10-24T17:00:00.000Z" });
+    const later = store.createDrop(
+      sampleDrop({
+        id: "later",
+        bottleName: "Later",
+        messageId: "msg-later",
+        closeTime: "2026-10-24T19:00:00.000Z",
+      })
+    );
+    const edits = [];
+    const clock = createClock(Date.parse("2026-10-24T18:00:00.000Z"));
+    let listCalls = 0;
+    const original = store.listPendingCloses.bind(store);
+    store.listPendingCloses = () => {
+      listCalls += 1;
+      if (listCalls === 1) throw new Error("sqlite busy");
+      return original();
+    };
+    const closer = new DropCloser(channelClient(store, edits), {
+      ...clock,
+      rescheduleRetryMs: 1_000,
+    });
+
+    await expect(closer.reschedulePending()).rejects.toThrow("sqlite busy");
+    expect(store.getDrop(due.id).status).toBe("open");
+    expect(clock.size).toBe(1);
+
+    await clock.advance(1_000);
+    expect(store.getDrop(due.id).status).toBe("closed");
+    expect(store.getDrop(later.id).status).toBe("open");
+    expect(edits[0].messageId).toBe("msg-drop");
+    expect(clock.size).toBe(1);
+    closer.stop();
+    store.close();
+  });
+
+  test("create with a past close time repairs the post via the sent message if auto-close edit fails", async () => {
+    const store = memoryDrops();
+    const client = dropClient(store);
+    const clock = createClock(Date.parse("2026-10-24T20:00:00.000Z"));
+    client.dropCloser = new DropCloser(client, clock);
+    const command = new Drop(client);
+    const privates = [];
+    let postedPayload;
+    const posted = {
+      id: "msg-create",
+      edit: async (payload) => {
+        postedPayload = payload;
+        return payload;
+      },
+    };
+    const interaction = {
+      guildId: "guild-1",
+      channelId: "channel-1",
+      user: { id: "mod-1" },
+      deferred: false,
+      replied: false,
+      options: optionBag({
+        subcommand: "create",
+        bottle: "Weller",
+        close_time: "2026-10-24T18:00:00Z",
+      }),
+      deferReply: async () => {
+        interaction.deferred = true;
+      },
+      editReply: async (payload) => privates.push(payload),
+      channel: {
+        send: async () => posted,
+      },
+    };
+
+    const drop = await command.execute(interaction);
+
+    expect(drop.status).toBe("closed");
+    expect(postedPayload.embeds[0].toJSON().footer.text).toBe("Closed");
+    expect(postedPayload.components[0].toJSON().components[0].disabled).toBe(true);
+    expect(privates).toEqual([
+      { content: "Drop posted and closed (the close time was already past)." },
+    ]);
+    client.dropCloser.stop();
+    store.close();
+  });
+
+  test("create with a past close time does not claim the post stayed updated if both edits fail", async () => {
+    const store = memoryDrops();
+    const client = dropClient(store);
+    const clock = createClock(Date.parse("2026-10-24T20:00:00.000Z"));
+    client.dropCloser = new DropCloser(client, clock);
+    const command = new Drop(client);
+    const privates = [];
+    const interaction = {
+      guildId: "guild-1",
+      channelId: "channel-1",
+      user: { id: "mod-1" },
+      deferred: false,
+      replied: false,
+      options: optionBag({
+        subcommand: "create",
+        bottle: "Weller",
+        close_time: "2026-10-24T18:00:00Z",
+      }),
+      deferReply: async () => {
+        interaction.deferred = true;
+      },
+      editReply: async (payload) => privates.push(payload),
+      channel: {
+        send: async () => ({
+          id: "msg-create",
+          edit: async () => {
+            throw new Error("Missing Access");
+          },
+        }),
+      },
+    };
+
+    const drop = await command.execute(interaction);
+
+    expect(drop.status).toBe("closed");
+    expect(privates[0].content).not.toBe("Drop posted.");
+    expect(privates[0].content).not.toBe("Drop posted and closed (the close time was already past).");
+    expect(privates[0].content).toMatch(/could not be updated/);
+    client.dropCloser.stop();
     store.close();
   });
 });
