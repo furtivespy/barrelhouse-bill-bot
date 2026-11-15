@@ -13,6 +13,7 @@ import { SpanStatusCode, trace } from "@opentelemetry/api";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import * as tracing from "../src/util/tracing.js";
 import {
+  DEFAULT_RESOURCE_DETECTORS,
   DEFAULT_SERVICE_NAME,
   SERVICE_NAME_ATTR,
   parseOtelHeaders,
@@ -22,12 +23,21 @@ import {
 } from "../src/util/tracing.js";
 
 const originalServiceName = process.env.OTEL_SERVICE_NAME;
+const originalResourceDetectors = process.env.OTEL_NODE_RESOURCE_DETECTORS;
 
 function restoreServiceName() {
   if (originalServiceName === undefined) {
     delete process.env.OTEL_SERVICE_NAME;
   } else {
     process.env.OTEL_SERVICE_NAME = originalServiceName;
+  }
+}
+
+function restoreResourceDetectors() {
+  if (originalResourceDetectors === undefined) {
+    delete process.env.OTEL_NODE_RESOURCE_DETECTORS;
+  } else {
+    process.env.OTEL_NODE_RESOURCE_DETECTORS = originalResourceDetectors;
   }
 }
 
@@ -145,6 +155,7 @@ describe("startTracing", () => {
   afterEach(async () => {
     await shutdownTracing();
     restoreServiceName();
+    restoreResourceDetectors();
   });
 
   test("does not construct or start the SDK when the endpoint is missing or blank", async () => {
@@ -191,10 +202,48 @@ describe("startTracing", () => {
     expect(process.env.OTEL_SERVICE_NAME).toBe(DEFAULT_SERVICE_NAME);
     expect(deps.constructed[0].serviceName).toBe(DEFAULT_SERVICE_NAME);
   });
+
+  test("pins OTEL_NODE_RESOURCE_DETECTORS to the 0.300 default when unset", async () => {
+    delete process.env.OTEL_NODE_RESOURCE_DETECTORS;
+    const deps = fakeTracingDeps();
+    const env = { OTEL_EXPORTER_OTLP_ENDPOINT: "https://otel.example/v1/traces" };
+
+    const result = await startTracing(env, deps);
+
+    expect(result.enabled).toBe(true);
+    expect(env.OTEL_NODE_RESOURCE_DETECTORS).toBe(DEFAULT_RESOURCE_DETECTORS);
+    expect(process.env.OTEL_NODE_RESOURCE_DETECTORS).toBe(DEFAULT_RESOURCE_DETECTORS);
+    expect(DEFAULT_RESOURCE_DETECTORS).toBe("env,process,host");
+  });
+
+  test("does not overwrite an operator-set OTEL_NODE_RESOURCE_DETECTORS", async () => {
+    delete process.env.OTEL_NODE_RESOURCE_DETECTORS;
+    const deps = fakeTracingDeps();
+    const env = {
+      OTEL_EXPORTER_OTLP_ENDPOINT: "https://otel.example/v1/traces",
+      OTEL_NODE_RESOURCE_DETECTORS: "os,serviceinstance",
+    };
+
+    const result = await startTracing(env, deps);
+
+    expect(result.enabled).toBe(true);
+    expect(env.OTEL_NODE_RESOURCE_DETECTORS).toBe("os,serviceinstance");
+    expect(process.env.OTEL_NODE_RESOURCE_DETECTORS).toBe("os,serviceinstance");
+  });
+
+  test("does not pin resource detectors when tracing stays off", async () => {
+    delete process.env.OTEL_NODE_RESOURCE_DETECTORS;
+    const deps = fakeTracingDeps();
+    const env = {};
+
+    expect(await startTracing(env, deps)).toEqual({ enabled: false });
+    expect(env.OTEL_NODE_RESOURCE_DETECTORS).toBeUndefined();
+    expect(process.env.OTEL_NODE_RESOURCE_DETECTORS).toBeUndefined();
+  });
 });
 
 describe("real OpenTelemetry packages", () => {
-  test("0.300 / sdk-trace still export the constructors tracing.js uses", () => {
+  test("0.301 / sdk-trace still export the constructors tracing.js uses", () => {
     expect(typeof NodeSDK).toBe("function");
     expect(typeof OTLPTraceExporter).toBe("function");
     expect(typeof BatchSpanProcessor).toBe("function");
@@ -212,6 +261,12 @@ describe("real OpenTelemetry packages", () => {
     expect(() => new SimpleSpanProcessor({
       exporter: new ConsoleSpanExporter(),
     })).not.toThrow();
+    expect(() => getNodeAutoInstrumentations({
+      "@opentelemetry/instrumentation-http": { enabled: true },
+      "@opentelemetry/instrumentation-undici": { enabled: true },
+      "@opentelemetry/instrumentation-dns": { enabled: false },
+      "@opentelemetry/instrumentation-fs": { enabled: false },
+    })).not.toThrow();
   });
 });
 
@@ -219,6 +274,7 @@ describe("Discord REST patch", () => {
   afterEach(async () => {
     await shutdownTracing();
     restoreServiceName();
+    restoreResourceDetectors();
   });
 
   test("patches the REST prototype discord.js Client uses, not the ESM @discordjs/rest export", async () => {
