@@ -1,5 +1,9 @@
 const DEFAULT_SERVICE_NAME = "barrelhouse-bill-bot";
 const SERVICE_NAME_ATTR = "service.name";
+// NodeSDK 0.300 default. 0.301+ also enables os and serviceinstance unless
+// OTEL_NODE_RESOURCE_DETECTORS is set, which would add os.* and
+// service.instance.id attributes.
+const DEFAULT_RESOURCE_DETECTORS = "env,process,host";
 
 function parseOtelHeaders(raw) {
   if (!raw || typeof raw !== "string") return {};
@@ -63,6 +67,22 @@ function applyServiceName(serviceName, env = process.env) {
   if (env !== process.env) assignIfBlank(process.env);
 }
 
+function applyResourceDetectors(env = process.env) {
+  const read = (target) => {
+    if (!target || typeof target !== "object") return "";
+    return typeof target.OTEL_NODE_RESOURCE_DETECTORS === "string"
+      ? target.OTEL_NODE_RESOURCE_DETECTORS.trim()
+      : "";
+  };
+  const detectors = read(env) || DEFAULT_RESOURCE_DETECTORS;
+  const assignIfBlank = (target) => {
+    if (!target || typeof target !== "object") return;
+    if (!read(target)) target.OTEL_NODE_RESOURCE_DETECTORS = detectors;
+  };
+  assignIfBlank(env);
+  if (env !== process.env) assignIfBlank(process.env);
+}
+
 async function loadSdkDeps(deps = {}) {
   const sdkNode = deps.NodeSDK ? null : await import("@opentelemetry/sdk-node");
   const exporter = deps.OTLPTraceExporter
@@ -120,6 +140,7 @@ async function startTracing(env = process.env, deps = {}) {
     } = await loadSdkDeps(deps);
 
     applyServiceName(config.serviceName, env);
+    applyResourceDetectors(env);
 
     const otlpExporter = new OTLPTraceExporter({
       url: config.endpoint,
@@ -224,6 +245,7 @@ async function shutdownTracing() {
 
 export {
   DEFAULT_SERVICE_NAME,
+  DEFAULT_RESOURCE_DETECTORS,
   SERVICE_NAME_ATTR,
   parseOtelHeaders,
   resolveTracingConfig,

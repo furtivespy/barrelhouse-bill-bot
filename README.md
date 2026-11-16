@@ -33,6 +33,7 @@ Optional:
 * `OTEL_SERVICE_NAME` (env) — defaults to `barrelhouse-bill-bot`.
 * `OTEL_EXPORTER_OTLP_HEADERS` (env) — comma-separated `key=value` headers for the exporter (for Honeycomb: `x-honeycomb-team=YOUR_API_KEY` and endpoint `https://api.honeycomb.io/v1/traces`).
 * `OTEL_DEBUG_SPANS` (env) — set to `true` to also print spans to the console.
+* `OTEL_NODE_RESOURCE_DETECTORS` (env) — NodeSDK 0.301+ would add `os` and `serviceinstance` detectors (and `os.*` / `service.instance.id` attributes) when this is unset. `startTracing` pins `env,process,host` (the 0.300 default) unless you set this.
 
 ## Adding a command or event
 
