@@ -9,7 +9,7 @@ Right now the bot answers `/ping`, `/status`, `/settings`, `/drop create`, `/dro
 
 * Copy `config.json.sample` to `config.json` and fill in `token` and `clientId`
 * Copy `.env.example` to `.env` and set `BOT_CONFIG` to the path of that config file
-* Install [Bun](https://bun.sh) 1.4.4 (see `packageManager` in `package.json`)
+* Install [Bun](https://bun.sh) 1.4.5 (see `packageManager` in `package.json`)
 * Install package dependencies: `bun install`
 * Run the bot: `bun run start`
 * Run tests: `bun test`
