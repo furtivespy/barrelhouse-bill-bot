@@ -70,3 +70,7 @@ data/config.json
 # Autopilot audit artifacts and local control output
 .autopilot/
 tmp/
+
+# Cursor tools (keep environment.json tracked for Cloud Agents / Automations)
+.cursor/*
+!.cursor/environment.json
