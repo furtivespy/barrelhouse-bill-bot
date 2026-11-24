@@ -1,0 +1,22 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.6.8/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    // ship-pr.json carries // comments, which its own tool allows but strict JSON does not.
+    "includes": ["**", "!**/*.sqlite*", "!bun.lock", "!.github/ship-pr.json", "!.autopilot", "!tmp"]
+  },
+  // Lint only for now; formatting is not enforced.
+  "formatter": {
+    "enabled": false
+  },
+  "assist": {
+    "enabled": false
+  },
+  "linter": {
+    "enabled": true
+  }
+}

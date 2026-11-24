@@ -59,7 +59,7 @@ describe("loadConfig", () => {
   });
 
   test("reads JSON from a path relative to src/bot.js", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bill-config-rel-"));
+    const dir = fs.mkdtempSync(path.join(srcDir, "..", ".bill-config-rel-"));
     const file = path.join(dir, "config.json");
     const config = { token: "rel", clientId: "c", environment: "development" };
     try {
@@ -88,11 +88,12 @@ describe("loadConfig", () => {
   });
 
   test("does not swallow a JSON parse error on a relative path", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bill-config-bad-"));
+    const dir = fs.mkdtempSync(path.join(srcDir, "..", ".bill-config-bad-"));
     const file = path.join(dir, "config.json");
     try {
       fs.writeFileSync(file, "{ token: 'no quotes' }");
       const relative = path.relative(srcDir, file);
+      expect(path.isAbsolute(relative)).toBe(false);
       expect(() => loadConfig({ BOT_CONFIG: relative })).toThrow(SyntaxError);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

@@ -1,6 +1,9 @@
 name: Release
 
-permissions: write-all
+permissions:
+  contents: write
+  pull-requests: read
+  packages: write
 
 on:
   pull_request:
@@ -33,6 +36,8 @@ jobs:
     uses: ./.github/workflows/_docker-build-push.yml
     with:
       semver_tag: ${{ needs.release.outputs.tag }}
+      ref: ${{ github.event.pull_request.merge_commit_sha }}
+      git_sha: ${{ github.event.pull_request.merge_commit_sha }}
     secrets:
       REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
       REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}

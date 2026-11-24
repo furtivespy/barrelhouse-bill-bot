@@ -66,3 +66,7 @@ data/*
 #private config as json (repo-root local copy, or data/config.json on the volume)
 config.json
 data/config.json
+
+# Autopilot audit artifacts and local control output
+.autopilot/
+tmp/

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import fs from "fs";
-import path from "path";
+import fs from "node:fs";
+import path from "node:path";
 import { listJsFiles } from "../src/handlers/discover.js";
 import { resolveDevGuildId } from "../src/handlers/slashcommands.js";
 
@@ -27,8 +27,9 @@ function envVarsReferencedInSrc() {
   const ident = /\b(?:env|process\.env)\.([A-Z][A-Z0-9_]+)/g;
   for (const file of listJsFiles(SRC)) {
     const source = fs.readFileSync(file, "utf8");
-    let match;
-    while ((match = ident.exec(source))) names.add(match[1]);
+    for (const match of source.matchAll(ident)) {
+      names.add(match[1]);
+    }
   }
   return [...names].sort();
 }

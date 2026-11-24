@@ -22,8 +22,11 @@ COPY --link . .
 # Final stage for app image
 FROM base
 
+ARG GIT_SHA=unknown
+
 # Copy built application
 COPY --from=build /app /app
+RUN printf '%s\n' "$GIT_SHA" > /app/GIT_SHA
 
 # Config and SQLite settings live on a separate volume mounted at /data
 RUN mkdir -p /data
