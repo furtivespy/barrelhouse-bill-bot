@@ -1,12 +1,33 @@
 name: Tests
 
+# Runs on every pull request and on main. Branch pushes are covered by the
+# pull_request run, so they no longer run the suite twice.
 on:
   push:
     branches:
-      - "**"
+      - main
   pull_request:
 
 jobs:
+  # Required check. Fast static lint via Biome.
+  lint:
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.5
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Lint
+        run: bun run lint
+
+  # Required check. `bun run verify` = lint + this job's two test runs.
   test:
     runs-on: ubuntu-26.04
     steps:

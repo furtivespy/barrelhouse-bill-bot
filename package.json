@@ -7,6 +7,11 @@
   "main": "src/bot.js",
   "scripts": {
     "test": "bun test",
+    "lint": "biome lint --diagnostic-level=error .",
+    "lint:warnings": "biome lint --max-diagnostics=none --reporter=summary .",
+    "verify": "bun scripts/verify.js",
+    "hooks:install": "git config core.hooksPath .githooks",
+    "control": "bun --no-env-file scripts/control-bill.js",
     "start": "bun src/bot.js"
   },
   "author": "",
@@ -24,5 +29,8 @@
     "discord.js": "^14.28.1",
     "dotenv": "^18.0.10",
     "moment": "^2.31.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.8"
   }
 }

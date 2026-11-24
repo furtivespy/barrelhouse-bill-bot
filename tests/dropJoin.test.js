@@ -423,7 +423,7 @@ describe("joinSignup allocation", () => {
       expect(new Set(signups.map((row) => row.userId)).size).toBe(20);
     } finally {
       parent.close();
-      fs.rmSync(dataDir, { recursive: true, force: true });
+      fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     }
   }, 20_000);
 
@@ -441,7 +441,7 @@ describe("joinSignup allocation", () => {
       expect(parent.getSignup(drop.id, "same-user").status).toBe("allocated");
     } finally {
       parent.close();
-      fs.rmSync(dataDir, { recursive: true, force: true });
+      fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     }
   }, 20_000);
 });

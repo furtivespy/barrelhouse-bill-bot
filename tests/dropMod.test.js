@@ -817,7 +817,7 @@ describe("removeSignup races", () => {
         worker.terminate();
       }
       parent.close();
-      fs.rmSync(dataDir, { recursive: true, force: true });
+      fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     }
   }, 20_000);
 });
