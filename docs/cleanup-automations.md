@@ -1,13 +1,13 @@
 # Cleanup automations
 
-Scheduled [Cursor Automations](https://cursor.com/docs/cloud-agent/automations.md) that open small PRs from the backlog. Automations are configured in the Cursor UI (`cursor.com/automations`), so this file is the versioned source of truth: change the prompt here first, then paste it into the automation.
+Repo-local prompts and guardrails for the three scheduled cleanup sweeps: daily friction sweep, daily docs freshness check, and weekly legacy reaper. Scheduling, runner/harness selection (`t3-local` / `cursor-cloud`), effort-scaled review, `skip`/`smoke` QA, and `ship-pr` auto-merge live in `furtivespy/ai-tool-n-docs` (`docs/workflow/`).
 
-Three are defined: the daily friction sweep, the daily docs freshness check, and the weekly legacy reaper. Not set up, on purpose: test pruning (an agent deciding which tests are redundant is the riskiest of the five), errors to issues (no error tracker webhook is wired in), and an automation that runs `ship-pr` (merging stays manual until a few weeks of PRs look right).
+Not enabled on purpose: test pruning (an agent deciding which tests are redundant is high risk) and errors-to-issues (no error tracker webhook is wired in).
 
 ## Rules every automation follows
 
 - One PR per run, or none when there is nothing to do.
-- It opens PRs; it never merges, approves, or force-pushes. A person runs the `ship-pr` loop ([skill](../.agents/skills/ship-pr/SKILL.md)) on each PR.
+- It opens PRs; it never merges, approves, or force-pushes. Opened PRs flow through the central workflow (`docs/workflow/`): scaled code review, `skip`/`smoke` QA, and `ship-pr` auto-merge for low-risk PRs (high-risk PRs park for the owner).
 - It follows [AGENTS.md](../AGENTS.md), the [ADRs](adr/), and [merge-policy](merge-policy.md): default to "no" on the hesitate list, no change to data scope without a migration path, no behavior beyond the issue.
 - `bun run verify` passes before it opens the PR.
 - It does not edit: `.github/`, `Dockerfile`, `docker-compose.yml`, `src/db/`, `src/config.permissionLevels.js`, `src/util/permissions.js`, `src/util/qaUnlock.js`, `scripts/pr-risk.js`, `docs/adr/`, `docs/merge-policy.md`, `.agents/skills/ship-pr/`, `.cursor/`. The merge-gate files in that list are also high risk by path in [merge-policy](merge-policy.md), so a person merges them regardless.
@@ -18,18 +18,10 @@ The VM is prepared by [`.cursor/environment.json`](../.cursor/environment.json),
 
 Fixes open `friction` issues, highest priority first: up to three per run, in one PR with one commit per issue. How friction is filed and ranked: [friction-log skill](../.agents/skills/friction-log/SKILL.md).
 
-### Automation settings
+### Workflow profile & shipping
 
-| Setting | Value |
-| --- | --- |
-| Name | `Barrelhouse Bill: Friction sweep` |
-| Trigger | Scheduled, daily (for example `0 13 * * *`, 8 AM Eastern) |
-| Repository | `furtivespy/barrelhouse-bill-bot` (cron triggers default to no repository; select it) |
-| Run as | Me |
-| Tools | Pull request creation: on. Comment on pull request: on. Approvals: off. Computer use: off |
-| MCP | Linear (read and write issues and comments) |
-| Memories | Off. The agent reads issue text that other agents wrote |
-| Access | Private |
+- **Profile:** `maintenance` (review: Standards + Adversarial + Spec; QA: `smoke`, or `skip` if strictly non-runtime; `ship-pr` auto-merges `low` / `patch`, parks `high`).
+- A friction fix touching only code and tests is normally `low` or `medium` risk; a multi-issue PR takes the risk tier of its riskiest commit (split out any `high`-risk issue). Confirm the PR carries `patch` before merging.
 
 ### Prompt
 
@@ -73,18 +65,10 @@ Never put secrets, tokens, .env contents, or production Discord IDs in an issue,
 
 Fixes docs that recent commits made stale. It does not rewrite style, add new docs, or delete anything.
 
-### Automation settings
+### Workflow profile & shipping
 
-| Setting | Value |
-| --- | --- |
-| Name | `Barrelhouse Bill: Docs freshness` |
-| Trigger | Scheduled, daily (for example `30 13 * * *`, 30 minutes after the friction sweep) |
-| Repository | `furtivespy/barrelhouse-bill-bot` |
-| Run as | Me |
-| Tools | Pull request creation: on. Comment on pull request: on. Approvals: off. Computer use: off |
-| MCP | None needed |
-| Memories | Off |
-| Access | Private |
+- **Profile:** `docs` (review: Standards + Spec; QA: `skip` when strictly docs-only; `ship-pr` auto-merges `low` / `patch`).
+- Docs-only PRs are normally `low` risk. Handle any items listed under "Needs a decision" separately, and confirm `patch` is set before merging.
 
 ### Prompt
 
@@ -121,18 +105,10 @@ Never put secrets, tokens, .env contents, or production Discord IDs in a PR.
 
 Removes dead code and completes `Cleanup:` issues whose "Ready when" check holds.
 
-### Automation settings
+### Workflow profile & shipping
 
-| Setting | Value |
-| --- | --- |
-| Name | `Barrelhouse Bill: Legacy reaper` |
-| Trigger | Scheduled, weekly (for example `0 14 * * 1`, Monday 9 AM Eastern) |
-| Repository | `furtivespy/barrelhouse-bill-bot` |
-| Run as | Me |
-| Tools | Pull request creation: on. Comment on pull request: on. Approvals: off. Computer use: off |
-| MCP | Linear (read and write issues and comments) |
-| Memories | Off |
-| Access | Private |
+- **Profile:** `maintenance` (review: Standards + Adversarial + Spec if ticket linked; QA: `smoke`, or `skip` if strictly non-runtime; `ship-pr` auto-merges `low` / `patch`, parks `high`).
+- Removals are two-way (git history keeps them). Review dynamic-load evidence before merging, confirm `patch` is set, and park any PR touching a high-risk path in `scripts/pr-risk.js`.
 
 ### Prompt
 
